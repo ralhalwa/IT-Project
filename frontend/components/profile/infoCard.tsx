@@ -341,7 +341,7 @@ export default function InfoCard({
 
   return (
     <div
-      className={`relative rounded-3xl overflow-hidden backdrop-blur-sm border border-[#8dffe893] shadow-lg min-h-[600px] w-full`}
+      className={`relative rounded-3xl overflow-hidden backdrop-blur-sm border border-[#8dffe800] shadow-lg min-h-[600px] w-full`}
     >
       {/* Main content with conditional blur */}
 
@@ -439,14 +439,14 @@ export default function InfoCard({
           {/* Stats Section */}
           <div className="p-6">
             <div className="grid grid-cols-3 gap-4">
-              <div className="p-4 text-center bg-white/5 rounded-lg border border-[#8dffe866]">
+              <div className="p-4 text-center bg-white/5 rounded-lg border border-[#8dffe800]">
                 <p className="text-xs text-white/80 mb-1">Posts</p>
                 <p className="text-3xl font-bold text-white">
                   {postCount || 0}
                 </p>
               </div>
               <div
-                className="p-4 text-center bg-white/5 rounded-lg cursor-pointer hover:bg-white/10 transition-colors border border-[#8dffe866]"
+                className="p-4 text-center bg-white/5 rounded-lg cursor-pointer hover:bg-white/10 transition-colors border border-[#8dffe800]"
                 onClick={handleOpenFollowerList}
               >
                 <p className="text-xs text-white/80 mb-1">Followers</p>
@@ -454,7 +454,7 @@ export default function InfoCard({
               </div>
 
               <div
-                className="p-4 text-center bg-white/5 rounded-lg cursor-pointer hover:bg-white/10 transition-colors border border-[#8dffe893]"
+                className="p-4 text-center bg-white/5 rounded-lg cursor-pointer hover:bg-white/10 transition-colors border border-[#8dffe800]"
                 onClick={handleOpenFollowingList}
               >
                 <p className="text-xs text-white/80 mb-1">Following</p>

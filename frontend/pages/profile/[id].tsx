@@ -674,8 +674,8 @@ if (n.type === 'group_event_created') {
               )}
             </button>
             {showRequests && (
-              <div className="absolute top-12 right-0 w-80 bg-black/90 backdrop-blur-lg border border-[#8dffe866] rounded-lg shadow-2xl z-20 mt-2">
-                <div className="p-4 border-b border-[#8dffe866] ">
+              <div className="absolute top-12 right-0 w-80 bg-black/90 backdrop-blur-lg border border-[#8dffe800] rounded-lg shadow-2xl z-20 mt-2">
+                <div className="p-4 border-b border-[#8dffe800] ">
                   <h3 className="text-lg font-bold text-white">Follow Requests</h3>
                 </div>
                 <div className="max-h-96 overflow-y-auto">
@@ -720,7 +720,7 @@ if (n.type === 'group_event_created') {
         </div>
 
         {/* Posts */}
-        <div className="w-full rounded-3xl shadow-lg overflow-hidden backdrop-blur-sm border border-[#8dffe866]">
+        <div className="w-full rounded-3xl shadow-lg overflow-hidden backdrop-blur-sm border border-[#8dffe800]">
           <div className={`w-full rounded-3xl shadow-lg overflow-hidden backdrop-blur-sm border border-white/10 ${!canViewProfile && currentUserId !== id ? "bg-black/70 backdrop-blur-2xl blur-lg" : ""}`}>
             <div className="p-6 h-full">
               <h2 className="text-xl font-bold text-white mb-3">Posts</h2>
