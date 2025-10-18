@@ -83,7 +83,7 @@ export default function Navbar({ user }: NavbarProps) {
 
       <div className="absolute left-1/2 -translate-x-1/2 pointer-events-none">
         <div className="font-extrabold max-sm:text-xl tracking-[0.4px] brand-title">
-          Social Network
+          BomberNet
         </div>
       </div>
 
@@ -99,7 +99,30 @@ export default function Navbar({ user }: NavbarProps) {
               color="radial-gradient(circle at 30% 30%, #00ffcc, #66ffff), #00ffcc"
             />
           </Link>
+
         )}
+        <Link
+          href="/bombermario#/bombermario"
+          prefetch={false}
+          title="Play Bomber Mario"
+          className="inline-flex items-center justify-center w-9 h-9 rounded-md
+             bg-[linear-gradient(180deg,#2a2a2a,#1f1f1f)] text-white
+             shadow-[inset_0_0_0_1px_rgba(255,255,255,.05)]
+             hover:-translate-y-[1px] hover:shadow-[0_6px_15px_rgba(0,255,200,.25)]
+             transition"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="currentColor"
+          >
+            <path d="M6 9v2H4v2h2v2h2v-2h2v-2H8V9H6zm12 0h-2v2h2v2h-2v2h2v-2h2v-2h-2z" />
+            <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" strokeWidth="2" />
+          </svg>
+        </Link>
+
         <button
           onClick={handleLogout}
           aria-label="Log out"
