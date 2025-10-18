@@ -1,0 +1,23 @@
+@import "tailwindcss";
+#app {
+      margin: 0;
+  padding: 0;
+  background-image: url("/assets/Wallpaper.jpg"); /* path to your image */
+  background-size: cover;     /* make it fill the screen */
+  background-repeat: no-repeat;
+  background-position: center center;
+  background-attachment: fixed; /* optional — keeps it still while scrolling */
+  color: white; /* if your background is dark */
+  font-family: "Press Start 2P", cursive;
+}
+#game{
+        margin: 0;
+  padding: 0;
+  background-image: url("/assets/Wallpaper.jpg"); /* path to your image */
+  background-size: cover;     /* make it fill the screen */
+  background-repeat: no-repeat;
+  background-position: center center;
+  background-attachment: fixed; /* optional — keeps it still while scrolling */
+  color: white; /* if your background is dark */
+  font-family: "Press Start 2P", cursive;
+}
