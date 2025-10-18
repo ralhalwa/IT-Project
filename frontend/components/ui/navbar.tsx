@@ -83,7 +83,7 @@ export default function Navbar({ user }: NavbarProps) {
 
       <div className="absolute left-1/2 -translate-x-1/2 pointer-events-none">
         <div className="font-extrabold max-sm:text-xl tracking-[0.4px] brand-title">
-          BomberNet
+          BomberNet 🎮
         </div>
       </div>
 
