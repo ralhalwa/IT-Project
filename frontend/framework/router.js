@@ -1,4 +1,4 @@
-import { mount } from "./renderer.js";
+import { mount, unmount } from "./renderer.js";
 
 let routes = {};
 let rootContainer = null;
@@ -6,19 +6,16 @@ let rootContainer = null;
 export function createRouter(routeConfig, container) {
   routes = routeConfig;
   rootContainer = container;
-
   window.addEventListener("popstate", renderRoute);
-  renderRoute(); // initial render
+  renderRoute();
 }
 
 function renderRoute() {
   const path = window.location.pathname;
   const component = routes[path] || routes["*"];
-  if (!component) {
-    console.error(`No route defined for path: ${path}`);
-    return;
-  }
+  if (!component) return console.error(`No route defined for path: ${path}`);
 
+  unmount(); // ✅ Clean previous route
   rootContainer.innerHTML = "";
   mount(component, rootContainer);
 }

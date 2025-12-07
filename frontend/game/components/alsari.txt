@@ -1,0 +1,849 @@
+import { h } from "../../framework/dom.js";
+import { useState, useEffect, useRef } from "../../framework/hooks.js";
+
+import RightRail from "../components/RightRail.js";
+import QuickChatPopover from "../components/QuickChatPopover.js";
+import AudioPanel from "../components/AudioPanel.js";
+import LeftHud from "../components/LeftHud.js";
+import MapGrid from "../components/MapGrid.js";
+
+import { getSocket } from "../services/ws.js";
+import { createRTC } from "../services/webrtc.js";
+import { asArray, isTypingTarget } from "../utils/dom-helpers.js";
+import { generateMap } from "../Methods/mapGenerator.js";
+import PlayerSprites from "../components/PlayerSprites.js";;
+import MyPlayer from "../components/MyPlayer.js";
+import PowerUpsSection from "../components/PowerUpsSection.js";
+import Bombs from "../components/Bombs.js";
+import Explosions from "../components/Explosions.js";
+import PowerupsUI from "../Components/PowerupsUI.js";
+
+const BOMB_COOLDOWN_MS = 900;
+const POWERUP_DURATION_MS = 30000; // 30 seconds per powerup
+
+/* ---------- helpers ---------- */
+
+function getSharedSocket() {
+  try { const s = typeof getSocket === "function" ? getSocket() : null; if (s) return s; } catch {}
+  if (typeof window !== "undefined" && window.__bm_ws) return window.__bm_ws;
+  return null;
+}
+const isValidMap = (m) => Array.isArray(m) && m.length > 0 && Array.isArray(m[0]);
+const myName = () => (localStorage.getItem("bm_name") || "").trim();
+const readSelfId = () => { try { return sessionStorage.getItem("bm_selfId"); } catch { return null; } };
+/* ---------- component ---------- */
+
+export default function Game() {
+  const [gameMap, setGameMap] = useState(() => generateMap());
+  const [players, setPlayers] = useState([]);
+  const [chatMessages, setChatMessages] = useState([]);
+  const [chatInput, setChatInput] = useState("");
+  const [bombCooling, setBombCooling] = useState(false);
+  const [bombs, setBombs] = useState([]);
+  const [playerPowerups, setPlayerPowerups] = useState({});
+  
+
+  const [playerPositions, setPlayerPositions] = useState({});
+
+  const [showQuickChat, setShowQuickChat] = useState(false);
+  const [quickText, setQuickText] = useState("");
+  const [showAudioPanel, setShowAudioPanel] = useState(false);
+  const [micOn, _setMicOn] = useState(false);
+  const [mutedMap, setMutedMap] = useState({});
+
+  // WebRTC refs
+  const peersRef = useRef({});
+  const remoteAudiosRef = useRef({});
+  const localStreamRef = useRef(null);
+  const selfIdRef = useRef(null);
+
+  const getMicOn = () => micOn;
+  const setMicOn = (v) => _setMicOn(v);
+  const getPlayers = () => players;
+  const getMutedNameMap = () => mutedMap;
+
+  const rtcRef = useRef(null);
+  if (!rtcRef.current) {
+    rtcRef.current = createRTC({
+      peersRef,
+      remoteAudiosRef,
+      localStreamRef,
+      selfIdRef,
+      getPlayers,
+      getMutedNameMap,
+      getMicOn,
+      setMicOn,
+    });
+  }
+  const rtc = rtcRef.current;
+
+function handleBombExplode(r, c, range = 1, explosionCells = null) {
+  setBombExplosions([{ r, c, range, explosionCells }]);
+
+  const ws = getSharedSocket();
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    setTimeout(() => {
+      ws.send(JSON.stringify({ type: "request-map" }));
+      // 🆕 REQUEST FRESH POSITIONS AFTER EXPLOSION
+      ws.send(JSON.stringify({ type: "request-positions" }));
+    }, 100);
+  }
+}
+  const [bombExplosions, setBombExplosions] = useState([]);
+
+  /* ---------- actions ---------- */
+
+
+function placeBomb() {
+  if (bombCooling) {
+    // console.log("❌ Bomb cooling down, cannot place");
+    return;
+  }
+  
+  const currentRC = readSelfRC();
+  const self = resolveSelfFromPlayers(players);
+  if (!currentRC && !self) {
+    // console.log("❌ Cannot place bomb - no position data");
+    return;
+  }
+  
+  const ownerName = self?.name || myName() || "unknown";
+  const ownerId = self?.id || readSelfId() || "local";
+  
+  let finalR, finalC;
+  if (self && typeof self.r === 'number' && typeof self.c === 'number') {
+    finalR = self.r;
+    finalC = self.c;
+  } else if (currentRC) {
+    finalR = currentRC.r;
+    finalC = currentRC.c;
+  } else {
+    return;
+  }
+  
+  const clamped = clampRC(finalR, finalC, gameMap);
+  finalR = clamped.r;
+  finalC = clamped.c;
+
+  const now = Date.now();
+  const bomb = {
+    id: `${ownerId}-${now}`,
+    r: finalR,
+    c: finalC,
+    owner: ownerName,
+    armAt: now,
+    explodeAt: now + 2000,
+  };
+  
+  setBombs((bs) => {
+    const currentBombs = Array.isArray(bs) ? bs : [];
+    return [...currentBombs, bomb];
+  });
+  
+  // Send to server
+  const ws = getSharedSocket();
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ 
+      type: "place-bomb", 
+      payload: { r: finalR, c: finalC, owner: ownerName, ownerId } 
+    }));
+  }
+  
+  // Auto-explode after 2 seconds
+  setTimeout(() => {
+    setBombs((bs) => {
+      const currentBombs = Array.isArray(bs) ? bs : [];
+      return currentBombs.filter((b) => b.id !== bomb.id);
+    });
+    
+    // Send explosion to server
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: "bomb-explode",
+        payload: { r: finalR, c: finalC, range: 1 }
+      }));
+    }
+    
+    // Trigger local explosion animation
+    handleBombExplode(finalR, finalC);
+  }, 2000);
+
+  setBombCooling(true);
+  setTimeout(() => {
+    setBombCooling(false);
+    console.log("✅ Bomb cooldown finished");
+  }, BOMB_COOLDOWN_MS);
+}
+
+  function toggleQuickChat() {
+    setShowQuickChat((o) => {
+      const n = !o;
+      if (n) {
+        setQuickText("");
+        setShowAudioPanel(false);
+        rtc?.setMicState?.(false);
+      }
+      return n;
+    });
+  }
+  function closeQuickChat() {
+    setShowQuickChat(false);
+    setQuickText("");
+  }
+  function toggleAudioPanel() {
+    setShowAudioPanel((o) => {
+      const n = !o;
+      if (n) {
+        setShowQuickChat(false);
+        setQuickText("");
+        // Apply current mute states immediately when panel opens
+        rtc?.syncMuteStatesToAudios?.(players, mutedMap);
+      }
+      return n;
+    });
+  }
+
+  function sendQuickChat() {
+    const ws = getSharedSocket();
+    const text = quickText.trim();
+    if (!ws || ws.readyState !== WebSocket.OPEN || !text) return;
+    if (text.length > 50) return alert("Message too long (max 50)");
+    ws.send(JSON.stringify({ type: "chat", payload: { text } }));
+    setQuickText("");
+    setShowQuickChat(false);
+  }
+
+  function sendChat() {
+    const ws = getSharedSocket();
+    const text = chatInput.trim();
+    if (!ws || ws.readyState !== WebSocket.OPEN || !text) return;
+    if (text.length > 80) return alert("Message too long (max 80)");
+    ws.send(JSON.stringify({ type: "chat", payload: { text } }));
+    setChatInput("");
+  }
+
+  // ⬇️ immediate mute UX + state update
+  function toggleMuted(name) {
+    setMutedMap((prev) => {
+      const next = { ...prev, [name]: !prev?.[name] };
+      // reflect change immediately in audio elements
+      rtc?.syncMuteStatesToAudios?.(players, next);
+      return next;
+    });
+  }
+
+
+
+  /* ---------- peer wiring ---------- */
+
+  function reconcilePeers(currentPlayers) {
+    if (!selfIdRef.current) return;
+
+    const peers = peersRef.current || {};
+    const ids = new Set(
+      asArray(currentPlayers)
+        .filter((p) => p && p.id && p.id !== selfIdRef.current)
+        .map((p) => p.id)
+    );
+
+    ids.forEach((id) => {
+      if (!peers[id]) rtc?.callPeer?.(id);
+      else if (peers[id].signalingState === "closed") {
+        try { peers[id].close(); } catch {}
+        delete peers[id];
+        rtc?.callPeer?.(id);
+      }
+    });
+
+    Object.keys(peers).forEach((id) => {
+      if (!ids.has(id)) {
+        try { peers[id].close(); } catch {}
+        delete peers[id];
+        const a = (remoteAudiosRef.current || {})[id];
+        if (a) { try { a.remove(); } catch {} delete remoteAudiosRef.current[id]; }
+      }
+    });
+  }
+const readSelfRC = () => {
+  try {
+    const s = sessionStorage.getItem("bm_self_rc");
+    if (!s) return null;
+    const obj = JSON.parse(s);
+    if (typeof obj?.r === "number" && typeof obj?.c === "number") return obj;
+    return null;
+  } catch { 
+    console.error("❌ Error reading position:", error);
+    return null; }
+};
+
+function resolveSelfFromPlayers(players) {
+  const list = Array.isArray(players) ? players : [];
+  const sid = readSelfId();
+  if (sid != null) {
+    const byId = list.find((p) => String(p?.id) === String(sid));
+    if (byId) return byId;
+  }
+  const me = myName().toLowerCase();
+  return list.find((p) => (p?.name || "").trim().toLowerCase() === me) || null;
+}
+
+function clampRC(r, c, gameMap) {
+  const rows = Array.isArray(gameMap) && gameMap.length ? gameMap.length : 11;
+  const cols = rows ? (Array.isArray(gameMap[0]) ? gameMap[0].length : 13) : 13;
+  const rr = Math.max(0, Math.min(r ?? 0, rows ? rows - 1 : 0));
+  const cc = Math.max(0, Math.min(c ?? 0, cols ? cols - 1 : 0));
+  return { r: rr, c: cc };
+}
+  useEffect(() => {
+    if (players && players.length && Array.isArray(players)) {
+      reconcilePeers(players);
+      // keep audio mutes in sync as roster changes
+      rtc?.syncMuteStatesToAudios?.(players, mutedMap);
+    }
+  }, [players]);
+
+  /* ---------- autoplay resume (Safari/iOS) ---------- */
+  useEffect(() => {
+    const resume = () => {
+      try {
+        document.querySelectorAll("audio").forEach((a) => {
+          try { a.muted = a.muted && false; } catch {}
+          try { a.play().catch(() => {}); } catch {}
+        });
+      } catch {}
+      window.removeEventListener("pointerdown", resume);
+      window.removeEventListener("keydown", resume);
+    };
+    window.addEventListener("pointerdown", resume, { once: true });
+    window.addEventListener("keydown", resume, { once: true });
+    return () => {
+      window.removeEventListener("pointerdown", resume);
+      window.removeEventListener("keydown", resume);
+    };
+  }, []);
+
+  /* ---------- websocket wiring ---------- */
+
+  useEffect(() => {
+    const ws = getSharedSocket();
+    if (!ws) {
+      alert("No WebSocket from lobby — returning to lobby.");
+      window.location.href = "/";
+      return;
+    }
+
+    const onMessage = (ev) => {
+      let msg;
+      try { msg = JSON.parse(ev.data); } catch { return; }
+
+      if (msg.type === "start") {
+        const list = asArray(msg.payload?.players);
+        if (list.length) setPlayers(list);
+
+        const m = msg.payload?.map;
+        if (isValidMap(m)) setGameMap(m);
+
+        const me = myName();
+        const my = list.find((p) => p?.name === me)?.id || null;
+        if (my) selfIdRef.current = my;
+        try { sessionStorage.setItem("bm_selfId", String(my)); } catch {}
+        rtc?.setMicState?.(false);
+        if (list.length) rtc?.startVoiceMesh?.(list);
+        // ensure initial mute state applied to any early tracks
+        rtc?.syncMuteStatesToAudios?.(list, mutedMap);
+        return;
+      }
+
+      if (Array.isArray(msg?.payload?.players)) {
+        const incoming = msg.payload.players;
+        if (incoming.length || players.length === 0) {
+          setPlayers(incoming);
+          if (!selfIdRef.current) {
+            const me = myName();
+            const my = incoming.find((p) => p?.name === me)?.id || null;
+            if (my) selfIdRef.current = my;
+          }
+          rtc?.startVoiceMesh?.(incoming);
+          rtc?.syncMuteStatesToAudios?.(incoming, mutedMap);
+        }
+      }
+
+      // 🆕 HANDLE POSITION UPDATES
+      if (msg.type === "all-positions") {
+        const positions = msg.payload?.positions || {};
+        console.log("📍 Received all player positions:", positions);
+        setPlayerPositions(positions);
+        return;
+      }
+
+      if (msg.type === "player-move") {
+        const { name, r, c, dir } = msg.payload;
+        console.log(`📍 Game.js received player move: ${name} to (${r}, ${c}) facing ${dir}`);
+        
+        // Update positions for PlayerSprites
+        setPlayerPositions(prev => ({
+          ...prev,
+          [name]: { r, c, dir }
+        }));
+        return;
+      }
+
+if (msg.type === "map" || msg.type === "map-update" || msg.type === "state") {
+  const m = msg?.payload?.map;
+  if (isValidMap(m)) {    
+    setGameMap(m);
+  }
+  return;
+}
+
+if (msg.type === "powerup-collected"){
+  const { playerName, powerupType } = msg.payload;
+  console.log(`🎁 CLIENT: ${playerName} collected ${powerupType}`);
+
+  setPlayerPowerups(prev => {
+    const playerData = prev[playerName] || {};
+    const existingPowerups = playerData[powerupType] || [];
+    
+    // Add new powerup with current timestamp
+    const newPowerup = {
+      collectedAt: Date.now(),
+      expiresAt: Date.now() + POWERUP_DURATION_MS
+    };
+    
+    return {
+      ...prev,
+      [playerName]: {
+        ...playerData,
+        [powerupType]: [...existingPowerups, newPowerup]
+      }
+    };
+  });
+
+  if (playerName === myName()) {
+    console.log(`🎉 You collected ${powerupType}!`);
+  }
+  return;
+}
+
+      if (msg.type === "error") {
+        const text = String(msg.message || "");
+        if (/nickname/i.test(text)) return;
+        alert(text || "Server error");
+        return;
+      }
+
+      if (msg.type === "chat") {
+        const payload = msg.payload || {};
+        const normalized = {
+          from: payload.from || "Unknown",
+          text: payload.text || "",
+          id: Date.now(),
+        };
+        setChatMessages((prev) =>
+          Array.isArray(prev) ? [...prev, normalized] : [normalized]
+        );
+
+        // toast animation
+        setTimeout(() => {
+          const el = document.querySelector(`[data-chat-id="${normalized.id}"]`);
+          if (el) {
+            el.classList.remove("translate-x-0", "opacity-0");
+            el.classList.add("translate-x-42", "opacity-100");
+          }
+        }, 50);
+        setTimeout(() => {
+          const el = document.querySelector(`[data-chat-id="${normalized.id}"]`);
+          if (el) {
+            el.classList.remove("translate-x-42", "opacity-100");
+            el.classList.add("translate-x-0", "opacity-0");
+          }
+          setTimeout(() => {
+            setChatMessages((prev) =>
+              Array.isArray(prev)
+                ? prev.filter((m) => m.id !== normalized.id)
+                : []
+            );
+          }, 1000);
+        }, 5000);
+        return;
+      }
+
+      // Handle bomb placement from server
+      if (msg.type === "bomb-placed") {
+        // console.log("💣 Game.js received bomb-placed:", msg.payload);
+        // The Bombs component will handle this via its own WebSocket listener
+        return;
+      }
+if (msg.type === "bomb-explode") {
+  const { r, c, range = 1, explosionCells } = msg.payload || {};
+  if (typeof r === "number" && typeof c === "number") {
+    handleBombExplode(r, c, range, explosionCells);
+  }
+  return;
+}
+
+      rtc?.handleSignalMessage?.(msg);
+    };
+
+    const onOpen = () => {
+      try {
+        ws.send(JSON.stringify({ type: "game-state", payload: { text: "" } }));
+        ws.send(JSON.stringify({ type: "request-players" }));
+        ws.send(JSON.stringify({ type: "request-map" }));
+        // 🆕 REQUEST INITIAL POSITIONS
+        ws.send(JSON.stringify({ type: "request-positions" })); 
+      } catch {}
+    };
+
+    const onClose = () => {
+      alert("Connection lost — returning to lobby.");
+      window.location.href = "/";
+    };
+
+    ws.addEventListener("message", onMessage);
+    ws.addEventListener("open", onOpen);
+    ws.addEventListener("close", onClose);
+
+    if (ws.readyState === WebSocket.OPEN) Promise.resolve().then(onOpen);
+
+    rtc?.setMicState?.(false);
+
+    return () => {
+      rtc?.cleanup?.();
+      try { ws.removeEventListener("message", onMessage); } catch {}
+      try { ws.removeEventListener("open", onOpen); } catch {}
+      try { ws.removeEventListener("close", onClose); } catch {}
+    };
+  }, []);
+
+  /* ---------- misc effects ---------- */
+
+
+// Call this after game starts
+// useEffect(() => {
+//   if (players.length > 0) {
+//     setTimeout(testPositionSystem, 1000);
+//   }
+// }, [players.length]);
+  useEffect(() => {
+    const chatBox = document.getElementById("chat-box");
+    if (chatBox) chatBox.scrollTop = chatBox.scrollHeight;
+  }, [chatMessages]);
+
+  useEffect(() => {
+    setShowQuickChat(false);
+    setShowAudioPanel(false);
+    setQuickText("");
+    rtc?.setMicState?.(false);
+  }, []);
+
+  useEffect(() => {
+    if (showQuickChat) {
+      setShowAudioPanel(false);
+      rtc?.setMicState?.(false);
+    } else {
+      setQuickText("");
+    }
+  }, [showQuickChat]);
+
+  // keep audio elements synced with either state change
+  useEffect(() => {
+    rtc?.syncMuteStatesToAudios?.(players, mutedMap);
+  }, [mutedMap, players]);
+
+useEffect(() => {
+  function onKey(e) {
+    const k = e.key?.toLowerCase();
+    const typing = isTypingTarget(e.target);
+    
+    if (showQuickChat || typing) return; // ✅ Use showQuickChat instead
+    if (k === " " || k === "b") {
+      e.preventDefault();
+      e.stopPropagation();
+      placeBomb();
+    }
+  }
+  
+  window.addEventListener("keydown", onKey, { capture: true });
+  return () => window.removeEventListener("keydown", onKey, { capture: true });
+}, [showQuickChat]); // ✅ Use showQuickChat as dependency
+
+useEffect(() => {
+  if (bombExplosions.length > 0) {
+    // Clear after a short delay to ensure they're processed
+    const timer = setTimeout(() => {
+      setBombExplosions([]);
+    }, 100);
+    return () => clearTimeout(timer);
+  }
+}, [bombExplosions]);
+
+// Timer to remove expired powerups - runs every second
+useEffect(() => {
+  const interval = setInterval(() => {
+    setPlayerPowerups(prev => {
+      const now = Date.now();
+      const updated = {};
+      let hasChanges = false;
+
+      Object.keys(prev).forEach(playerName => {
+        const playerData = prev[playerName];
+        updated[playerName] = {};
+
+        Object.keys(playerData).forEach(powerupType => {
+          const powerups = playerData[powerupType];
+          if (Array.isArray(powerups)) {
+            // Filter out expired powerups
+            const active = powerups.filter(p => p.expiresAt > now);
+            if (active.length !== powerups.length) {
+              hasChanges = true;
+            }
+            if (active.length > 0) {
+              updated[playerName][powerupType] = active;
+            }
+          }
+        });
+
+        // Remove player if no powerups left
+        if (Object.keys(updated[playerName]).length === 0) {
+          delete updated[playerName];
+        }
+      });
+
+      return hasChanges ? updated : prev;
+    });
+  }, 1000); // Run every second
+
+  return () => clearInterval(interval);
+}, []);
+
+  return h(
+    "div",
+    {
+      class: "min-h-screen w-full flex flex-col items-center justify-center relative overflow-hidden",
+      style: `
+        background-image: url('/assets/Sky.png');
+        background-size: cover;
+        background-position: center;
+        background-repeat: no-repeat;
+        background-attachment: fixed;
+      `,
+    },
+
+    h(
+    "div",
+    {
+      class: "flex flex-col items-center flex-1 py-4"
+    },
+// In Game.js - update the MapGrid children section
+MapGrid({
+  gameMap,
+  children: h(
+    "div",
+    null,
+    
+    // Bombs component
+    Bombs({
+      gameMap,
+      players,
+      bombs,
+      setBombs,
+      disableHotkey: showQuickChat,
+      renderLayer: true,
+      renderButton: false,
+      onBombExplode: handleBombExplode
+    }),
+    // ONLY RENDER EXPLOSIONS IF GAMEMAP IS READY
+    // Array.isArray(gameMap) && gameMap.length > 0 ? 
+    PowerupsUI({gameMap}),
+
+     Array.isArray(gameMap) && gameMap.length > 0 ? 
+      Explosions({ 
+        gameMap, 
+        bombExplosions
+      }) : null,
+    // Player sprites
+    PlayerSprites({ 
+      gameMap, 
+      players, 
+      selfName: myName(),
+      playerPositions  // 🆕 PASS POSITIONS
+    }),
+
+    // My player
+    (() => {
+      const self = resolveSelfFromPlayers(players);
+      return self ? MyPlayer({ gameMap, players, self }) : null;
+    })()
+  )
+}),
+  PowerUpsSection({ playerPowerups, selfName: myName(),  key: `powerups-${myName()}-${Date.now()}` }),
+),
+
+Bombs({
+  gameMap,
+  players,
+  bombs,           // ✅ ADD THIS
+  setBombs,        // ✅ ADD THIS
+  disableHotkey: showQuickChat,
+  renderLayer: false,
+  renderButton: true,
+}),
+
+  RightRail({
+      toggleQuickChat,
+      toggleAudioPanel,
+      micOn,
+      onMicToggle: async () => {
+        const next = !micOn;
+        await rtc?.setMicState?.(next);
+      },
+      
+    }),
+    showQuickChat
+      ? QuickChatPopover({
+          quickText,
+          setQuickText,
+          onSend: sendQuickChat,
+          onClose: closeQuickChat,
+        })
+      : null,
+showAudioPanel ? AudioPanel({ players, mutedMap, toggleMuted, selfName: myName(),  }) : null,
+    h(
+      "button",
+      {
+        "aria-label": "Game info",
+        class: `
+          fixed right-6 top-5 z-[999]
+          w-12 h-12 rounded-full flex items-center justify-center
+          cursor-pointer bg-black/50 border border-white/30 backdrop-blur
+          shadow-[0_6px_15px_rgba(0,0,0,.4)]
+          hover:scale-105 active:scale-95 transition-transform
+          focus:outline-none focus:ring-2 focus:ring-yellow-300/60
+        `,
+        
+      },
+      h("span", { class: "text-lg text-white font-semibold select-none tracking-wide" }, "i")
+    ),
+    LeftHud({ players, chatMessages })
+  );
+}.   
+
+
+
+
+
+
+import { h } from "../../framework/dom.js"
+import { POWERUPS } from "../Methods/PowersUps.js";
+
+export default function PowerUpsSection({ playerPowerups, selfName }){
+    function normalizeName(name) {
+   let cleaned = String(name || "").trim();
+  // Remove surrounding quotes if they exist
+  if ((cleaned.startsWith('"') && cleaned.endsWith('"')) || 
+      (cleaned.startsWith("'") && cleaned.endsWith("'"))) {
+    cleaned = cleaned.slice(1, -1);
+  }
+  return cleaned.toLowerCase();
+}
+ selfName = normalizeName(selfName)
+    const currentPlayerPowerups = playerPowerups[selfName] || {}
+
+     console.log("🎁 PowerUpsSection: Rendering with powerups", {
+      selfName,
+      currentPlayerPowerups,
+      hasPlayer: !!playerPowerups[selfName],
+      allPlayerPowerups: playerPowerups
+    });
+    
+    const now = Date.now();
+    const powerups = Object.entries(POWERUPS).map( ([type, data]) => {
+        const activePowerups = currentPlayerPowerups[type] || [];
+        
+        // Calculate total remaining time from all active powerups
+        const totalTimeRemaining = Array.isArray(activePowerups) 
+          ? activePowerups.reduce((sum, p) => sum + Math.max(0, p.expiresAt - now), 0)
+          : 0;
+        
+        return {
+            type,
+            color: data.color,
+            icon: `/assets/PowerUps/${data.icon}`,
+            timeRemaining: totalTimeRemaining,
+            maxTime: 30000 // 30 seconds in milliseconds
+        };
+    })
+
+    return h(
+        "div",
+        {
+            class: "powerups-section flex flex-col items-center"
+        },
+        h(
+            "div",
+            {
+                class: "flex gap-6"
+            },
+            ...powerups.map(powerup => PowerUpBar(powerup))
+        )
+    )
+}
+
+
+function PowerUpBar(powerup){
+    const progressPercentage = Math.min((powerup.timeRemaining / powerup.maxTime) * 100, 100);
+    const secondsRemaining = Math.ceil(powerup.timeRemaining / 1000);
+
+    console.log(`📊 PowerUpBar: ${powerup.type} - time: ${secondsRemaining}s, progress: ${progressPercentage}%`);
+
+    return h(
+        "div",
+        {
+            class: 'powerup-item flex items-center gap-3'
+        }, 
+        //mushroom icon
+        h(
+            "div",
+            {
+                class: "icon-container"
+            },
+            h( "img", {
+                src: powerup.icon,
+                class: 'w-14 h-16 pixelated',
+                alt: `${powerup.type} powerup`
+            })
+        ),
+
+        //progress bar container
+        h(
+            "div",
+            {
+                class: "progress-container flex flex-col items-center"
+            },
+
+        h(
+        "div",
+        {
+          class: "progress-background w-32 h-6 border-2 border-white bg-gray-800 pixel-border"
+        },
+
+        h(
+          "div",
+          {
+            class: `progress-fill h-full bg-${powerup.color}-500`,
+            style: `width: ${progressPercentage}%` 
+          }
+        )
+        ),
+
+         h(
+        "div",
+        {
+          class: "text-white text-sm mt-1 pixel-font"
+        },
+        powerup.timeRemaining > 0 ? `${secondsRemaining}s` : ""
+      )
+    )
+)
+}

@@ -1,6 +1,9 @@
-import { update } from './renderer.js';
+import { update } from "./renderer.js";
+
 let hooks = [];
 let currentHook = 0;
+let framePending = false;
+let effectDisposers = [];
 
 export function resetHooks() {
   currentHook = 0;
@@ -16,7 +19,14 @@ export function useState(initialValue) {
   const setState = (newValue) => {
     hooks[hookIndex] =
       typeof newValue === "function" ? newValue(hooks[hookIndex]) : newValue;
-    update(); // trigger re-render
+
+    if (!framePending) {
+      framePending = true;
+      requestAnimationFrame(() => {
+        framePending = false;
+        update();
+      });
+    }
   };
 
   const value = hooks[hookIndex];
@@ -25,23 +35,42 @@ export function useState(initialValue) {
 }
 
 export function useEffect(callback, deps) {
-  const idx = currentHook; // ✅ Corrected
+  const idx = currentHook++;
+  const prev = hooks[idx];
 
-  const prevDeps = hooks[idx];
-  const hasChanged =
-    !prevDeps || !deps || deps.some((d, i) => d !== prevDeps[i]);
+  const prevDeps = (prev && Array.isArray(prev.deps)) ? prev.deps : null;
 
-  if (hasChanged) {
-    queueMicrotask(() => callback());
-    hooks[idx] = deps ? [...deps] : undefined;
+  // changed if: first run, deps omitted, prev had no deps, length differs, or any value differs
+  const changed =
+    !prev ||
+    !deps ||
+    !prevDeps ||
+    deps.length !== prevDeps.length ||
+    deps.some((d, i) => d !== prevDeps[i]);
+
+  if (changed) {
+    if (prev && typeof prev.cleanup === "function") {
+      // let previous cleanup run before installing the new effect
+      try { prev.cleanup(); } catch {}
+    }
+
+    // run effect after paint
+    requestAnimationFrame(() => {
+      const maybeCleanup = callback();
+      hooks[idx] = {
+        deps: deps || [],
+        cleanup: (typeof maybeCleanup === "function") ? maybeCleanup : null,
+        __kind: "effect"
+      };
+    });
+  } else {
+    // keep previous record
+    hooks[idx] = prev;
   }
-
-  currentHook++; // ✅ Corrected
 }
 
 
 export function useLocalStorageState(key, initialValue) {
-  // read from localStorage once
   let storedValue;
   try {
     const stored = localStorage.getItem(key);
@@ -61,4 +90,15 @@ export function useLocalStorageState(key, initialValue) {
   };
 
   return [state, setValue];
+}
+
+export function useRef(initialValue) {
+  const idx = currentHook;
+  const prev = hooks[idx];
+  if (!prev || typeof prev !== "object" || !("current" in prev)) {
+    hooks[idx] = { current: initialValue };
+  }
+  const ref = hooks[idx];
+  currentHook++;
+  return ref;
 }

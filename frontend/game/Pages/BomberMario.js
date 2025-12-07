@@ -1,4 +1,3 @@
-// src/Pages/bomberman.js
 import { h } from "../../framework/dom.js";
 import { navigate } from "../../framework/router.js";
 import {
@@ -6,15 +5,26 @@ import {
   useLocalStorageState,
   useEffect,
 } from "../../framework/hooks.js";
+import { useErrorPopup, showError } from "../components/ErrorPopup.js";
 
 const host = window.location.hostname;
-const WS_URL = `ws://${host}:8081`;
+const WS_PORT = 8081;
+
+// For localhost dev, ALWAYS use plain ws://
+// (only use wss:// if one day you put the game behind HTTPS with TLS)
+const WS_URL =
+  host === "localhost" || host === "127.0.0.1"
+    ? `ws://${host}:${WS_PORT}`
+    : `wss://${host}:${WS_PORT}`;
 
 const characters = {
   mario: { name: "Mario", icon: "./assets/Characters/icons/Mario.png" },
   peach: { name: "Peach", icon: "./assets/Characters/icons/Peach.png" },
   yoshi: { name: "Yoshi", icon: "./assets/Characters/icons/Yoshi.png" },
-  toadette: { name: "Toadette", icon: "./assets/Characters/icons/Toadette.png"},
+  toadette: {
+    name: "Toadette",
+    icon: "./assets/Characters/icons/Toadette.png",
+  },
 };
 
 const duplicateColors = [
@@ -27,7 +37,7 @@ export default function BomberMario() {
   const [name, setName] = useLocalStorageState("bm_name", "");
   const [joined, setJoined] = useState(false);
   const [players, setPlayers] = useState([]);
-  const [countdown, setCountdown] = useState(null); // timestamp ms
+  const [countdown, setCountdown] = useState(null);
   const [chatMessages, setChatMessages] = useState([]);
   const [chatInput, setChatInput] = useState("");
   const [selectedChar, setSelectedChar] = useLocalStorageState(
@@ -36,19 +46,43 @@ export default function BomberMario() {
   );
   const [status, setStatus] = useState("disconnected");
 
-  // ws kept in closure
   let socketRef = BomberMario.__socket;
   if (!socketRef) BomberMario.__socket = null;
 
-  // ensure a shared socket object reference so reconnection logic works
   function getSocket() {
     return BomberMario.__socket;
   }
   function setSocket(ws) {
     BomberMario.__socket = ws;
+    if (typeof window !== "undefined") window.__bm_ws = ws || null;
   }
 
-  // Connect or reconnect
+  // --- helpers to persist/clear our selfId (tab-isolated) ---
+  function saveSelfId(id) {
+    if (id === undefined || id === null) return;
+    try {
+      const s = String(id);
+      sessionStorage.setItem("bm_selfId", s);
+      console.debug("[Lobby] stored bm_selfId (tab) =", s);
+    } catch {}
+  }
+
+  function clearSelfId() {
+    try {
+      sessionStorage.removeItem("bm_selfId");
+    } catch {}
+  }
+
+  function tryDeriveSelfIdFromRoster(list) {
+    // If server didn't send selfId yet, derive by nickname in lobby roster
+    const me = (name || "").trim().toLowerCase();
+    const mine = (Array.isArray(list) ? list : []).find(
+      (p) => (p?.name || p?.nickname || "").trim().toLowerCase() === me
+    );
+    const derived = mine?.id ?? mine?.playerId ?? mine?.uid;
+    if (derived !== undefined && derived !== null) saveSelfId(derived);
+  }
+
   function connectAndJoin(nickname) {
     if (
       !nickname ||
@@ -56,10 +90,9 @@ export default function BomberMario() {
       nickname.length < 2 ||
       nickname.length > 32
     ) {
-      alert("Please enter a nickname");
+      showError("Please enter a nickname!");
       return;
     }
-
     nickname = nickname.trim().substring(0, 32);
 
     if (getSocket()) {
@@ -79,22 +112,24 @@ export default function BomberMario() {
       ws.send(
         JSON.stringify({
           type: "join",
-          payload: {
-            name: nickname,
-            character: selectedChar, // ✅ include character
-          },
+          payload: { name: nickname, character: selectedChar },
         })
       );
       setJoined(true);
+      document
+        .getElementById("nickname-input")
+        ?.setAttribute("disabled", "true");
     };
 
     ws.onmessage = (ev) => {
       try {
         const msg = JSON.parse(ev.data);
         if (msg.type === "error") {
-          alert(msg.message);
+          showError(msg.message);
           setJoined(false);
-          setName("");
+          document
+            .getElementById("nickname-input")
+            ?.removeAttribute("disabled");
           return;
         }
         handleServerMessage(msg);
@@ -106,8 +141,9 @@ export default function BomberMario() {
     ws.onclose = () => {
       setStatus("disconnected");
       setJoined(false);
-      // attempt reconnect after a short delay (only if desired)
-      // setTimeout(() => connectAndJoin(nickname), 2000);
+      document.getElementById("nickname-input")?.removeAttribute("disabled");
+      setSocket(null);
+      clearSelfId(); // ✅ clear on disconnect
     };
 
     ws.onerror = (err) => {
@@ -118,29 +154,44 @@ export default function BomberMario() {
 
   function handleServerMessage(msg) {
     if (!msg || !msg.type) return;
+
     if (msg.type === "lobby") {
       const payload = msg.payload || {};
-      setPlayers(payload.players || []);
+      const list = payload.players || [];
+      setPlayers(list);
       setCountdown(payload.countdownUntil || null);
+
+      // try to derive selfId early if possible
+      tryDeriveSelfIdFromRoster(list);
     } else if (msg.type === "chat") {
       setChatMessages((prev) => [...prev, msg.payload]);
-    } else if (msg.type === "start") {
-      // Game starting - payload includes players and gameId
-      setStatus("starting");
-      // small UX: navigate to /bomberman/game or show "Starting..." — for now we just show a message
-      setTimeout(() => {
-        // you can change this to navigate to actual game route
-        navigate("/game");
-        console.log("START payload:", msg.payload);
-        // keep UI stable, or clear lobby UI
-      }, 200);
-    }
+      } else if (msg.type === "start") {
+    const sid = msg?.payload?.selfId;
+    if (sid != null) saveSelfId(sid); 
+
+    setStatus("starting");
+
+    // Stop lobby music before entering game
+    try {
+      const lobbySound = document.getElementById("lobby-sound");
+      if (lobbySound) {
+        lobbySound.pause();
+        lobbySound.currentTime = 0;
+      }
+    } catch {}
+
+    setTimeout(() => {
+      navigate("/game");
+      console.log("START payload:", msg.payload);
+    }, 200);
+  }
+
   }
 
   function sendChat() {
     const ws = getSocket();
     if (!ws || ws.readyState !== WebSocket.OPEN) {
-      alert("Not connected");
+      showError("Not connected");
       return;
     }
     if (!chatInput.trim()) return;
@@ -148,7 +199,6 @@ export default function BomberMario() {
     setChatInput("");
   }
 
-  // small countdown UI helper
   function countdownSecondsLeft() {
     if (!countdown) return null;
     const left = Math.max(0, Math.ceil((countdown - Date.now()) / 1000));
@@ -157,61 +207,74 @@ export default function BomberMario() {
 
   useEffect(() => {
     if (!countdown) return;
-
     const interval = setInterval(() => {
       const left = countdownSecondsLeft();
       if (left <= 0) {
         clearInterval(interval);
         setCountdown(null);
       } else {
+        // force repaint
         setCountdown((prev) => prev);
       }
     }, 1000);
-
     return () => clearInterval(interval);
   }, [countdown]);
 
-  // Auto-scroll chat to bottom when new messages appear
   useEffect(() => {
     const chatBox = document.querySelector("#chat-box");
-    if (chatBox) {
-      chatBox.scrollTop = chatBox.scrollHeight;
-    }
+    if (chatBox) chatBox.scrollTop = chatBox.scrollHeight;
   }, [chatMessages]);
 
   const charCounts = players.reduce((acc, p) => {
     if (p?.character) acc[p.character] = (acc[p.character] || 0) + 1;
     return acc;
   }, {});
+  // 🔊 Lobby music lifecycle
+  useEffect(() => {
+    const audio = document.getElementById("lobby-sound");
+    if (!audio) return;
 
-  let seen = {}; // ✅ track duplicates across all rows
+    audio.loop = true;
+    audio.volume = 0.4; // tweak if too loud
 
-  // UI
+    audio.play().catch(() => {
+      // browser might block autoplay; we'll also try again on first user action
+    });
+
+    return () => {
+      try {
+        audio.pause();
+        audio.currentTime = 0;
+      } catch {}
+    };
+  }, []);
+
+  let seen = {};
+
   return h(
-
     "div",
     {
       class:
         "min-h-screen flex items-center gap-16 justify-center bg-transparent p-6 text-gray-100",
     },
+     // ⬇⬇ BACK BUTTON HERE ⬇⬇
     h(
-  "button",
-  {
-    class:
-      "fixed top-4 left-4 z-50 px-3 py-2 rounded-lg bg-gray-900/80 border border-gray-700 text-white text-sm hover:bg-gray-800 transition flex items-center gap-2",
-    onClick: () => {
-      // Go back to your Next.js home page
-      window.location.href = "/";
-    },
-    title: "Back to Home",
-  },
-  h(
-    "svg",
-    { xmlns: "http://www.w3.org/2000/svg", width: 16, height: 16, viewBox: "0 0 24 24", fill: "currentColor" },
-    h("path", { d: "M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z" })
-  ),
-  h("span", {}, "Back")
-),
+      "button",
+      {
+        class:
+          "fixed top-4 left-4 z-50 px-3 py-2 rounded-lg bg-gray-900/80 border border-gray-700 text-white text-xs hover:bg-gray-800 transition flex items-center gap-1",
+        onClick: () => {
+          window.location.href = "/"; // back to Social home
+        },
+      },
+      "← Back"
+    ),
+    useErrorPopup(),
+     h("audio", {
+    id: "lobby-sound",
+    src: "/audio/LobbySound.mp3",
+  }),
+    // Players
     h(
       "div",
       {
@@ -241,14 +304,11 @@ export default function BomberMario() {
 
                 let isDuplicate = false;
                 let duplicateIndex = -1;
-
                 if (playerChar) {
                   if (!seen[playerChar]) seen[playerChar] = 0;
                   seen[playerChar]++;
-
                   if (seen[playerChar] > 1) {
                     isDuplicate = true;
-                    // first duplicate gets index 0
                     duplicateIndex = seen[playerChar] - 2;
                   }
                 }
@@ -285,9 +345,7 @@ export default function BomberMario() {
                         h(
                           "span",
                           {},
-                          `P${i + 1}: ${player.name} (${
-                            characters[playerChar || "mario"]?.name
-                          })`
+                          `P${i + 1}: ${player.name}`
                         )
                       )
                     : `P${i + 1}: WAITING...`
@@ -295,13 +353,25 @@ export default function BomberMario() {
               })
           )
         ),
-        h(
-          "div",
-          { class: "mt-1 text-sm text-yellow-300", key: "countdown" }, // keyed to avoid duplicates
-          countdown !== null ? `Starting in ${countdownSecondsLeft()}s` : ""
-        )
+        (() => {
+  if (countdown === null) return null;
+  
+  const secondsLeft = countdownSecondsLeft();
+  
+  return h(
+    "div",
+    { 
+      class: "mt-1 text-sm text-yellow-300", 
+      key: "countdown-display",
+      "data-seconds": secondsLeft
+    },
+    `Starting in ${secondsLeft}s`
+  );
+})()
       )
     ),
+
+    // Join / Leave and character selector
     h(
       "div",
       {
@@ -319,6 +389,7 @@ export default function BomberMario() {
             class:
               "w-full px-3 py-2 placeholder:text-[0.6rem] text-center rounded bg-gray-700 border border-gray-600 text-white",
             value: name,
+            id: "nickname-input",
             onInput: (e) => setName(e.target.value),
             placeholder: "Enter a nickname...",
           }),
@@ -367,11 +438,14 @@ export default function BomberMario() {
                   {
                     class: "px-4 py-2 bg-red-600 rounded hover:bg-red-700",
                     onClick: () => {
-                      // close socket and leave
                       const ws = getSocket();
                       if (ws) ws.close();
                       setSocket(null);
+                      clearSelfId(); // ✅ clear id on leave
                       setJoined(false);
+                      document
+                        .getElementById("nickname-input")
+                        ?.removeAttribute("disabled");
                       setPlayers([]);
                       setCountdown(null);
                     },
@@ -381,8 +455,6 @@ export default function BomberMario() {
               )
         )
       ),
-
-      // Status + helpers
       h(
         "div",
         {
@@ -392,11 +464,13 @@ export default function BomberMario() {
         h("div", {}, `Connection: ${status}`)
       )
     ),
+
+    // Lobby chat
     h(
       "div",
       {
         class:
-          "w-full h-[45vh] flex flex-col justify-center  max-w-2xl bg-gray-800/70 p-6 rounded-xl border border-gray-700",
+          "w-full h-[45vh] flex flex-col justify-center max-w-2xl bg-gray-800/70 p-6 rounded-xl border border-gray-700",
       },
       h(
         "div",
@@ -452,9 +526,8 @@ export default function BomberMario() {
     )
   );
 
-  // helper debug function (doesn't send server messages, just for dev)
   function broadcastLocalDebug(currentPlayers) {
     console.log("Local debug: players=", currentPlayers);
-    alert(`Local debug: ${currentPlayers.length} players (see console)`);
+    showError(`Local debug: ${currentPlayers.length} players (see console)`);
   }
 }
