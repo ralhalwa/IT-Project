@@ -8,6 +8,7 @@ import Navbar from "../../components/ui/navbar";
 import { User, UserProfile as UserProfileType } from "@/types/user";
 import { toast, ToastContainer } from "react-toastify";
 import Head from "next/head";
+            import { Pencil } from "lucide-react";
 
 
 type Post = {
@@ -664,7 +665,24 @@ if (n.type === 'group_event_created') {
       <div className="w-full flex flex-col gap-8 max-w-6xl relative mt-20 ">
         {/* notification center */}
         {currentUserId === id && (
-          <div className="absolute top-0 right-0 z-10 m-5">
+  <div className="absolute top-0 right-0 z-10 m-5 flex items-center gap-4">
+
+<button
+  onClick={() => router.push("/profile/edit")}
+  title="Edit Profile"
+  className="
+    relative p-3 rounded-full
+    bg-white/10 backdrop-blur-sm
+    border border-white/20
+    shadow-[0_0_12px_rgba(0,255,255,0.35)]
+    hover:bg-white/20 hover:shadow-[0_0_18px_rgba(0,255,255,0.5)]
+    transition-all
+    text-white
+  "
+>
+  <Pencil className="h-6 w-6 text-white" />
+</button>
+
             <button onClick={() => setShowRequests(!showRequests)} className="relative p-3 bg-white/10 backdrop-blur-sm rounded-full hover:bg-white/20 transition-colors" title="Follow Requests">
               <Bell className="h-6 w-6 text-white" />
               {pendingRequestCount > 0 && (
@@ -717,12 +735,12 @@ if (n.type === 'group_event_created') {
             key={refreshTrigger}
             canViewProfile={canViewProfile}
           />
-          <button
+          {/* <button
   onClick={() => router.push("/profile/edit")}
   className="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-sm"
 >
   Edit Profile
-</button>
+</button> */}
 
         </div>
 
