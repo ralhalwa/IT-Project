@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"database/sql"
+	"encoding/json"
 	"net/http"
 	"strings"
 
@@ -11,22 +12,185 @@ import (
 func MeHandler(w http.ResponseWriter, r *http.Request) {
 	uid, err := GetUserIDFromRequest(r)
 	if err != nil || uid == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "id": "", "nickname": ""})
+		// Keep old shape for callers that expect `id` and `nickname`
+		writeJSON(w, http.StatusUnauthorized, map[string]any{
+			"ok":       false,
+			"id":       "",
+			"nickname": "",
+		})
 		return
 	}
 
-	var nickname string
-	// simple lookup
-	if err := db.DB.QueryRow(`SELECT nickname FROM users WHERE id = ?`, uid).Scan(&nickname); err != nil {
-		nickname = ""
-	}
+	switch r.Method {
+	case http.MethodGet:
+		// 🔹 Return FULL current user profile
+		var user struct {
+			ID        string `json:"id"`
+			Email     string `json:"email"`
+			FirstName string `json:"firstName"`
+			LastName  string `json:"lastName"`
+			Nickname  string `json:"nickname"`
+			AboutMe   string `json:"aboutMe"`
+			Avatar    string `json:"avatar"`
+			DOB       string `json:"dob"`
+			IsPublic  bool   `json:"is_public"`
+		}
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":       true,
-		"id":       uid,
-		"nickname": nickname,
-	})
+		err := db.DB.QueryRow(`
+			SELECT id,
+			       email,
+			       first_name,
+			       last_name,
+			       COALESCE(nickname, ''),
+			       COALESCE(about_me, ''),
+			       COALESCE(avatar, ''),
+			       date(dob),
+			       is_public
+			FROM users
+			WHERE id = ?
+		`, uid).Scan(
+			&user.ID,
+			&user.Email,
+			&user.FirstName,
+			&user.LastName,
+			&user.Nickname,
+			&user.AboutMe,
+			&user.Avatar,
+			&user.DOB,
+			&user.IsPublic,
+		)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				writeErr(w, http.StatusNotFound, "User not found")
+			} else {
+				writeErr(w, http.StatusInternalServerError, "Database error")
+			}
+			return
+		}
+
+		// Keep `ok`, `id`, `nickname` for old callers
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":        true,
+			"id":        user.ID,
+			"email":     user.Email,
+			"firstName": user.FirstName,
+			"lastName":  user.LastName,
+			"nickname":  user.Nickname,
+			"aboutMe":   user.AboutMe,
+			"avatar":    user.Avatar,
+			"dob":       user.DOB,
+			"is_public": user.IsPublic,
+		})
+		return
+
+	case http.MethodPost:
+		// 🔹 Update current user from JSON body (used by your edit page)
+		var payload struct {
+			Email     string `json:"email"`
+			FirstName string `json:"firstName"`
+			LastName  string `json:"lastName"`
+			Nickname  string `json:"nickname"`
+			AboutMe   string `json:"aboutMe"`
+			Avatar    string `json:"avatar"`
+			DOB       string `json:"dob"`
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			writeErr(w, http.StatusBadRequest, "Invalid JSON body")
+			return
+		}
+
+		if payload.Email == "" {
+			writeErr(w, http.StatusBadRequest, "Email is required")
+			return
+		}
+
+		_, err := db.DB.Exec(`
+			UPDATE users
+			SET email = ?,
+			    first_name = ?,
+			    last_name = ?,
+			    dob = ?,
+			    nickname = ?,
+			    about_me = ?,
+			    avatar = ?
+			WHERE id = ?
+		`,
+			payload.Email,
+			payload.FirstName,
+			payload.LastName,
+			payload.DOB,
+			payload.Nickname,
+			payload.AboutMe,
+			payload.Avatar,
+			uid,
+		)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "Failed to update profile")
+			return
+		}
+
+		// After update, return the fresh data (same shape as GET)
+		var user struct {
+			ID        string `json:"id"`
+			Email     string `json:"email"`
+			FirstName string `json:"firstName"`
+			LastName  string `json:"lastName"`
+			Nickname  string `json:"nickname"`
+			AboutMe   string `json:"aboutMe"`
+			Avatar    string `json:"avatar"`
+			DOB       string `json:"dob"`
+			IsPublic  bool   `json:"is_public"`
+		}
+
+		err = db.DB.QueryRow(`
+			SELECT id,
+			       email,
+			       first_name,
+			       last_name,
+			       COALESCE(nickname, ''),
+			       COALESCE(about_me, ''),
+			       COALESCE(avatar, ''),
+			       date(dob),
+			       is_public
+			FROM users
+			WHERE id = ?
+		`, uid).Scan(
+			&user.ID,
+			&user.Email,
+			&user.FirstName,
+			&user.LastName,
+			&user.Nickname,
+			&user.AboutMe,
+			&user.Avatar,
+			&user.DOB,
+			&user.IsPublic,
+		)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "Database error")
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":        true,
+			"id":        user.ID,
+			"email":     user.Email,
+			"firstName": user.FirstName,
+			"lastName":  user.LastName,
+			"nickname":  user.Nickname,
+			"aboutMe":   user.AboutMe,
+			"avatar":    user.Avatar,
+			"dob":       user.DOB,
+			"is_public": user.IsPublic,
+		})
+		return
+
+	default:
+		writeErr(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
 }
+
 
 func GetUserProfileHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {

@@ -11,3 +11,4 @@ CREATE TABLE users (
     is_public BOOLEAN DEFAULT 1,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+  

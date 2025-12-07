@@ -397,7 +397,7 @@ export default function InfoCard({
               </button>
             </div>
 
-            <h2 className="text-lg text-white font-bold">aka {nickname}</h2>
+            <h2 className="text-lg text-white font-bold">{nickname}</h2>
 
             <p className="text-sm text-transparent bg-clip-text bg-gradient-to-r from-white/80 to-blue-100/80">
               {email}
