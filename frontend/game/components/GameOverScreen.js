@@ -3,21 +3,37 @@ import { useState, useEffect, useLocalStorageState } from "../../framework/hooks
 
 export function GameOverScreen() {
   const [visible, setVisible] = useState(false);
-  const [gameOver , setGameOver] = useLocalStorageState("bm_gameover_v2",{});
-  const onReturn = () => {
-    setGameOver({});
-    window.location.href = "/";
-  }
-  if (!gameOver.name) {
-    setGameOver({});
-    window.location.href = "/";
-  }
-  const winner = gameOver||{};
+  const [gameOver, setGameOver] = useLocalStorageState("bm_gameover_v2", {});
+
+  // 🔁 If someone opens /gameover with no stored winner, bounce back to lobby
+  useEffect(() => {
+    const noData = !gameOver || (gameOver.name === undefined && gameOver.name !== "Unknown");
+    if (noData) {
+      setGameOver({});
+      window.location.href = "/bombermario"; // go to lobby page
+    }
+  }, [gameOver, setGameOver]);
+
+  // 👑 Winner object (fallback to empty)
+  const winner = gameOver || {};
+
+  // ✅ Safe winner check so .toUpperCase() never crashes
+  const hasRealWinner =
+    winner &&
+    typeof winner.name === "string" &&
+    winner.name.trim() !== "" &&
+    winner.name !== "Unknown";
 
   useEffect(() => {
     const t = setTimeout(() => setVisible(true), 100);
     return () => clearTimeout(t);
   }, []);
+
+  // 🔙 Button: clear gameOver and go to lobby page
+  const onReturn = () => {
+    setGameOver({});
+    window.location.href = "/bombermario"; // this is your lobby route in Next
+  };
 
   return h(
     "div",
@@ -41,7 +57,7 @@ export function GameOverScreen() {
       "GAME OVER"
     ),
 
-    // Winner text
+    // Winner text (safe)
     h(
       "p",
       {
@@ -50,7 +66,7 @@ export function GameOverScreen() {
           drop-shadow-[2px_2px_0_#000]
         `,
       },
-      winner && winner.name != "Unknown"
+      hasRealWinner
         ? `🏆 Winner: ${winner.name.toUpperCase()}`
         : "💀 Everyone perished!"
     ),
