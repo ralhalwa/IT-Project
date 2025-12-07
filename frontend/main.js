@@ -5,6 +5,7 @@ import { createRouter } from "./framework/router.js";
 import BomberMario from "./game/Pages/BomberMario.js";
 import Game from "./game/Pages/Game.js";
 import NotFound from "./game/Pages/404.js";
+import { GameOverScreen } from "./game/components/GameOverScreen.js"; 
 
 // Small safety wrapper so a broken route doesn't crash everything
 const safe = (viewFn) => {
@@ -37,7 +38,7 @@ const routes = {
 
   // in-game view (router will go here when BomberMario calls navigate("/game"))
   "/game": () => safe(Game),
-
+"/gameover": () => safe(GameOverScreen),
   // 404 + wildcard
   "/404": () => safe(NotFound),
   "*": () => safe(NotFound),
@@ -45,3 +46,4 @@ const routes = {
 
 // Mount the mini-app inside the <div id="app"> that Next.js page renders
 createRouter(routes, document.getElementById("app"));
+  
