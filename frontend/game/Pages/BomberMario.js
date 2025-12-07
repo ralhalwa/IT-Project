@@ -16,6 +16,10 @@ const WS_URL =
   host === "localhost" || host === "127.0.0.1"
     ? `ws://${host}:${WS_PORT}`
     : `wss://${host}:${WS_PORT}`;
+const urlParams = new URLSearchParams(window.location.search);
+// Example: /lobby?room=A or /lobby?lobby=room-1
+const LOBBY_ID =
+  urlParams.get("room") || urlParams.get("lobby") || "default";
 
 const characters = {
   mario: { name: "Mario", icon: "./assets/Characters/icons/Mario.png" },
@@ -112,7 +116,7 @@ export default function BomberMario() {
       ws.send(
         JSON.stringify({
           type: "join",
-          payload: { name: nickname, character: selectedChar },
+          payload: {lobbyId: LOBBY_ID, name: nickname, character: selectedChar },
         })
       );
       setJoined(true);
@@ -461,7 +465,8 @@ export default function BomberMario() {
           class:
             "flex justify-between items-center text-[0.55rem] text-gray-400",
         },
-        h("div", {}, `Connection: ${status}`)
+        h("div", {}, `Connection: ${status}`),
+        h("div", {}, `Lobby: ${LOBBY_ID}`)
       )
     ),
 
