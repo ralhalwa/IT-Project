@@ -16,14 +16,16 @@ const WS_PORT = 8081;
 const urlParams = new URLSearchParams(window.location.search);
 const ROOM_ID = urlParams.get("roomId") || "public";
 
-// Base WS URL (no query)
-const BASE_WS_URL =
-  host === "localhost" || host === "127.0.0.1"
-    ? `ws://${host}:${WS_PORT}`
-    : `wss://${host}:${WS_PORT}`;
+// Decide protocol based on the page protocol
+// If the page is loaded with https → use wss
+// If the page is loaded with http → use ws
+const isSecure = window.location.protocol === "https:";
+
+const BASE_WS_URL = `${isSecure ? "wss" : "ws"}://${host}:${WS_PORT}`;
 
 // FINAL WS URL with ?roomId=...
 const WS_URL = `${BASE_WS_URL}?roomId=${encodeURIComponent(ROOM_ID)}`;
+
 
 
 const characters = {

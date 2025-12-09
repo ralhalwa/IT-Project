@@ -14,7 +14,7 @@ function getRoomId() {
   let roomId = "default";
 
   if (typeof window === "undefined") {
-    return roomId;
+    return roomId;  
   }
 
   try {
