@@ -20,6 +20,7 @@ import Explosions from "../components/Explosions.js";
 import PowerupsUI from "../components/PowerupsUI.js";
 import ActivePowerupsIndicator from "../components/ActivePowerupsIndicator.js";
 import InfoOverlay from "../components/InfoOverlay.js";
+import SoundPanel from "../components/SoundPanel.js";
 import { navigate } from "../../framework/router.js";
 
 const BOMB_COOLDOWN_MS = 5000;
@@ -72,7 +73,14 @@ export default function Game() {
   const [mutedMap, setMutedMap] = useState({});
   const [gameOver, setGameOver] = useLocalStorageState("bm_gameover_v2",{});
   const [showInfo, setShowInfo] = useState(false);
- const gameMusicRef = useRef(null);
+ const [showSoundPanel, setShowSoundPanel] = useState(false);
+ const [volumes, setVolumes] = useState({
+    gameMusic: 0.3,
+    soundEffects: 0.7,
+    voiceChat: 0.8
+  });
+  
+  const gameMusicRef = useRef(null);
    const powerupSoundRef = useRef(null);
 const damageSoundRef = useRef(null);
 const explosionSoundRef = useRef(null); 
@@ -103,87 +111,169 @@ const placeBombSoundRef = useRef(null);
     });
   }
   const rtc = rtcRef.current;
-  // if (!powerupSoundRef.current && typeof Audio !== "undefined") {
-  //   const a = new Audio("/audio/01-power-up-mario.mp3"); 
-  //   a.preload = "auto";
-  //   powerupSoundRef.current = a;
-  // }
-  useEffect(() => {
-  if (!powerupSoundRef.current && typeof Audio !== "undefined") {
-    const a = new Audio("/audio/01-power-up-mario.mp3");
-    a.preload = "auto";
-    powerupSoundRef.current = a;
-  }
-}, []);
-  useEffect(() => {
-  if (!damageSoundRef.current && typeof Audio !== "undefined") {
-    const a = new Audio("/audio/mario-damage.mp3");
-    a.preload = "auto";
-    damageSoundRef.current = a;
-  }
-}, []);
-useEffect(() => {
-  if (!explosionSoundRef.current && typeof Audio !== "undefined") {
-    const a = new Audio("/audio/ExplosionSound.mp3");
-    a.preload = "auto";
-    explosionSoundRef.current = a;
-  }
-}, []);
-useEffect(() => {
-  if (!placeBombSoundRef.current && typeof Audio !== "undefined") {
-    const a = new Audio("/audio/PlaceBombSound.mp3");
-    a.preload = "auto";
-    placeBombSoundRef.current = a;
-  }
-}, []);
+  
+  // Helper to get safe volume value
+  const getSafeVolume = (value, defaultValue = 0.5) => {
+    const num = Number(value);
+    return !isNaN(num) && isFinite(num) && num >= 0 && num <= 1 ? num : defaultValue;
+  };
 
-function playDamageSound() {
-  const a = damageSoundRef.current;
-  if (!a) return;
-  try {
-    a.currentTime = 0;
-    a.play().catch(() => {});
-  } catch {}
-}
+  // Initialize volumes from localStorage on mount
+  useEffect(() => {
+    const loadVolumes = () => {
+      try {
+        const savedMusic = localStorage.getItem('bm_gameMusic_vol');
+        const savedSfx = localStorage.getItem('bm_sfx_vol');
+        const savedVoice = localStorage.getItem('bm_voice_vol');
+        
+        const newVolumes = {
+          gameMusic: getSafeVolume(savedMusic, 0.3),
+          soundEffects: getSafeVolume(savedSfx, 0.7),
+          voiceChat: getSafeVolume(savedVoice, 0.8)
+        };
+        setVolumes(newVolumes);
+        // Update audio refs with loaded volumes
+        if (gameMusicRef.current) {
+          gameMusicRef.current.volume = newVolumes.gameMusic;
+        }
+        if (rtc?.setRemoteVolume) {
+          rtc.setRemoteVolume(newVolumes.voiceChat);
+        }
+      } catch (e) {
+        console.warn('Failed to load sound settings:', e);
+      }
+    };
+    
+    loadVolumes();
+  }, []);
+
+  // Function to update all audio volumes safely
+  const updateAudioVolumes = (newVolumes) => {
+    const safeVolumes = {
+      gameMusic: getSafeVolume(newVolumes.gameMusic, 0.3),
+      soundEffects: getSafeVolume(newVolumes.soundEffects, 0.7),
+      voiceChat: getSafeVolume(newVolumes.voiceChat, 0.8)
+    };
+    
+    setVolumes(safeVolumes);
+    
+    // Update game music
+    if (gameMusicRef.current) {
+      gameMusicRef.current.volume = safeVolumes.gameMusic;
+    }
+    
+    // Update other sound refs
+    [powerupSoundRef, damageSoundRef, explosionSoundRef, placeBombSoundRef].forEach(ref => {
+      if (ref.current) {
+        ref.current.volume = safeVolumes.soundEffects;
+      }
+    });
+    
+    // Update WebRTC audio volumes
+    if (rtc?.setRemoteVolume) {
+      rtc.setRemoteVolume(safeVolumes.voiceChat);
+    }
+    
+    // Save to localStorage
+    try {
+      localStorage.setItem('bm_gameMusic_vol', safeVolumes.gameMusic.toString());
+      localStorage.setItem('bm_sfx_vol', safeVolumes.soundEffects.toString());
+      localStorage.setItem('bm_voice_vol', safeVolumes.voiceChat.toString());
+    } catch {}
+  };
+
+  // Initialize sound refs
+  useEffect(() => {
+    const safeSfxVol = getSafeVolume(volumes.soundEffects, 0.7);
+    
+    if (!powerupSoundRef.current && typeof Audio !== "undefined") {
+      const a = new Audio("/audio/01-power-up-mario.mp3");
+      a.preload = "auto";
+      a.volume = safeSfxVol;
+      powerupSoundRef.current = a;
+    }
+  }, []);
+
+  useEffect(() => {
+    const safeSfxVol = getSafeVolume(volumes.soundEffects, 0.7);
+    
+    if (!damageSoundRef.current && typeof Audio !== "undefined") {
+      const a = new Audio("/audio/mario-damage.mp3");
+      a.preload = "auto";
+      a.volume = safeSfxVol;
+      damageSoundRef.current = a;
+    }
+  }, []);
+
+  useEffect(() => {
+    const safeSfxVol = getSafeVolume(volumes.soundEffects, 0.7);
+    
+    if (!explosionSoundRef.current && typeof Audio !== "undefined") {
+      const a = new Audio("/audio/ExplosionSound.mp3");
+      a.preload = "auto";
+      a.volume = safeSfxVol;
+      explosionSoundRef.current = a;
+    }
+  }, []);
+
+  useEffect(() => {
+    const safeSfxVol = getSafeVolume(volumes.soundEffects, 0.7);
+    
+    if (!placeBombSoundRef.current && typeof Audio !== "undefined") {
+      const a = new Audio("/audio/PlaceBombSound.mp3");
+      a.preload = "auto";
+      a.volume = safeSfxVol;
+      placeBombSoundRef.current = a;
+    }
+  }, []);
+
+  function playDamageSound() {
+    const a = damageSoundRef.current;
+    if (!a) return;
+    try {
+      a.currentTime = 0;
+      a.volume = getSafeVolume(volumes.soundEffects, 0.7);
+      a.play().catch(() => {});
+    } catch {}
+  }
+
   function playPowerupSound() {
     const a = powerupSoundRef.current;
     if (!a) return;
     try {
-      a.currentTime = 0;       // restart from beginning
-      a.play().catch(() => {}); // ignore blocked/autoplay errors
+      a.currentTime = 0;
+      a.volume = getSafeVolume(volumes.soundEffects, 0.7);
+      a.play().catch(() => {});
     } catch {}
   }
+
   function playExplosionSound() {
-  const a = explosionSoundRef.current;
-  if (!a) return;
-  try {
-    a.currentTime = 0;
-    a.play().catch(() => {});
-  } catch {}
-}
-function playPlaceBombSound() {
-  try {
-    // Use the preloaded src if available, otherwise fall back to the path
-    const base = placeBombSoundRef.current;
-    const src = base?.src || "/audio/PlaceBombSound.mp3";
-
-    // Create a fresh Audio instance so overlapping plays don't fight
-    const a = new Audio(src);
-    // Optional: keep volume in sync with your base object
-    if (base && typeof base.volume === "number") {
-      a.volume = base.volume;
-    }
-
-    const p = a.play();
-    if (p && typeof p.then === "function") {
-      p.catch((err) => {
-        console.warn("PlaceBomb sound play failed:", err);
-      });
-    }
-  } catch (err) {
-    console.error("PlaceBomb sound error:", err);
+    const a = explosionSoundRef.current;
+    if (!a) return;
+    try {
+      a.currentTime = 0;
+      a.volume = getSafeVolume(volumes.soundEffects, 0.7);
+      a.play().catch(() => {});
+    } catch {}
   }
-}
+
+  function playPlaceBombSound() {
+    try {
+      const base = placeBombSoundRef.current;
+      const src = base?.src || "/audio/PlaceBombSound.mp3";
+      const a = new Audio(src);
+      a.volume = getSafeVolume(volumes.soundEffects, 0.7);
+      
+      const p = a.play();
+      if (p && typeof p.then === "function") {
+        p.catch((err) => {
+          console.warn("PlaceBomb sound play failed:", err);
+        });
+      }
+    } catch (err) {
+      console.error("PlaceBomb sound error:", err);
+    }
+  }
 
   function handleBombExplode(r, c, range = 1, explosionCells = null) {
     setBombExplosions([{ r, c, range, explosionCells }]);
@@ -208,6 +298,7 @@ function playPlaceBombSound() {
       if (n) {
         setQuickText("");
         setShowAudioPanel(false);
+        setShowSoundPanel(false);
         rtc?.setMicState?.(false);
       }
       return n;
@@ -224,9 +315,23 @@ function playPlaceBombSound() {
       const n = !o;
       if (n) {
         setShowQuickChat(false);
+        setShowSoundPanel(false);
         setQuickText("");
         // Apply current mute states immediately when panel opens
         rtc?.syncMuteStatesToAudios?.(players, mutedMap);
+      }
+      return n;
+    });
+  }
+
+  function toggleSoundPanel() {
+    setShowSoundPanel((o) => {
+      const n = !o;
+      if (n) {
+        setShowQuickChat(false);
+        setShowAudioPanel(false);
+        setQuickText("");
+        rtc?.setMicState?.(false);
       }
       return n;
     });
@@ -268,7 +373,7 @@ function playPlaceBombSound() {
     if (!audio) return;
 
     audio.loop = true;
-    audio.volume = 0.00; // adjust if too loud
+    audio.volume = getSafeVolume(volumes.gameMusic, 0.3);
 
     // Try to play immediately (Chrome/etc). Your global pointerdown handler
     // will also call play() again if browser blocks autoplay.
@@ -280,7 +385,7 @@ function playPlaceBombSound() {
         audio.currentTime = 0;
       } catch {}
     };
-  }, []);
+  }, [volumes.gameMusic]);
 
   // powerup collection handler
   useEffect(() => {
@@ -810,6 +915,7 @@ function playPlaceBombSound() {
   useEffect(() => {
     setShowQuickChat(false);
     setShowAudioPanel(false);
+    setShowSoundPanel(false);
     setQuickText("");
     rtc?.setMicState?.(false);
   }, []);
@@ -817,6 +923,7 @@ function playPlaceBombSound() {
   useEffect(() => {
     if (showQuickChat) {
       setShowAudioPanel(false);
+      setShowSoundPanel(false);
       rtc?.setMicState?.(false);
     } else {
       setQuickText("");
@@ -839,12 +946,20 @@ function playPlaceBombSound() {
         e.stopPropagation();
         document.getElementById("bomb-button")?.click();
       }
+      
+      // Sound panel shortcut (Alt+S)
+      if (e.altKey && k === 's') {
+        e.preventDefault();
+        e.stopPropagation();
+        toggleSoundPanel();
+      }
     }
 
     window.addEventListener("keydown", onKey, { capture: true });
     return () =>
       window.removeEventListener("keydown", onKey, { capture: true });
-  }, [showQuickChat]);
+  }, [showQuickChat, showSoundPanel]);
+
   useEffect(() => {
     if (bombExplosions.length > 0) {
       // Clear after a short delay to ensure they're processed
@@ -922,6 +1037,7 @@ function setLives(id, lives) {
       ref: gameMusicRef,
       autoplay: true,   // will be handled & resumed by your pointerdown effect
       loop: true,
+      id: "game-music-audio"
     }),
     useErrorPopup(),
     h(
@@ -929,10 +1045,6 @@ function setLives(id, lives) {
       {
         class: "flex flex-col items-center flex-1 py-4",
       },
-      // ActivePowerupsIndicator({
-      //   playerPowerups,
-      //   selfName: myName(),
-      // }),
 
       MapGrid({
         gameMap,
@@ -1028,6 +1140,41 @@ function setLives(id, lives) {
           selfName: myName(),
         })
       : null,
+    
+    showSoundPanel
+      ? SoundPanel({
+          open: showSoundPanel,
+          onClose: () => setShowSoundPanel(false),
+          onVolumeChange: updateAudioVolumes
+        })
+      : null,
+    
+    // Sound panel button
+    h(
+      "button",
+      {
+        "aria-label": "Sound settings",
+        onclick: toggleSoundPanel,
+        class: `
+          fixed right-32 top-5 z-[999]
+          w-12 h-12 rounded-full flex items-center justify-center
+          cursor-pointer bg-black/50 border border-white/30 backdrop-blur
+          shadow-[0_6px_15px_rgba(0,0,0,.4)]
+          hover:scale-105 active:scale-95 transition-transform
+          focus:outline-none focus:ring-2 focus:ring-yellow-300/60
+          group
+        `,
+      },
+      h(
+        "span",
+        { 
+          class: "text-2xl text-yellow-300 group-hover:scale-110 transition-transform",
+          style: "filter: drop-shadow(0 2px 2px rgba(0,0,0,0.5));"
+        },
+        "🔊"
+      )
+    ),
+    
     showInfo
       ? InfoOverlay({
           open: showInfo,

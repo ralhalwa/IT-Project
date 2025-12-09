@@ -563,7 +563,7 @@ function evaluateCountdownRules(lobby) {
 
   if (!lobby.countdown && count >= 2) {
     log(`Lobby[${lobby.id}] At least 2 players - starting 30s countdown`);
-    startCountdown(lobby, 30000);
+    startCountdown(lobby, 5000);
   }
 }
 
