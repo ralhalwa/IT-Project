@@ -24,7 +24,93 @@ import SoundPanel from "../components/SoundPanel.js";
 import { navigate } from "../../framework/router.js";
 
 const BOMB_COOLDOWN_MS = 5000;
-const POWERUP_DURATION_MS = 10000; // 10 seconds for flame powerup
+const POWERUP_DURATION_MS = 10000;
+
+/* ---------- Audio Manager ---------- */
+
+// Create a global audio manager that handles all sound effects
+class AudioManager {
+  constructor() {
+    this.sounds = {};
+    this.volume = 0.7; // Default volume
+    this.muted = false;
+    this.initSounds();
+  }
+
+  initSounds() {
+    // Create audio objects for all sound effects
+    this.sounds = {
+      powerup: this.createAudio("/audio/01-power-up-mario.mp3"),
+      damage: this.createAudio("/audio/mario-damage.mp3"),
+      explosion: this.createAudio("/audio/ExplosionSound.mp3"),
+      placeBomb: this.createAudio("/audio/PlaceBombSound.mp3")
+    };
+  }
+
+  createAudio(src) {
+    const audio = new Audio();
+    audio.src = src;
+    audio.preload = "auto";
+    audio.volume = this.muted ? 0 : this.volume;
+    return audio;
+  }
+
+  setVolume(volume) {
+    this.volume = Math.max(0, Math.min(1, volume));
+    this.updateAllVolumes();
+  }
+
+  setMuted(muted) {
+    this.muted = muted;
+    this.updateAllVolumes();
+  }
+
+  updateAllVolumes() {
+    Object.values(this.sounds).forEach(audio => {
+      if (audio) {
+        audio.volume = this.muted ? 0 : this.volume;
+      }
+    });
+  }
+
+  play(soundName) {
+    if (this.muted || this.volume <= 0) {
+      return; // Don't play if muted or volume is 0
+    }
+
+    const audio = this.sounds[soundName];
+    if (!audio) return;
+
+    try {
+      // Reset audio to start
+      audio.currentTime = 0;
+      
+      // Play the sound
+      const playPromise = audio.play();
+      if (playPromise !== undefined) {
+        playPromise.catch(err => {
+          console.warn(`Failed to play ${soundName}:`, err);
+        });
+      }
+    } catch (err) {
+      console.error(`Error playing ${soundName}:`, err);
+    }
+  }
+
+  playPowerup() { this.play("powerup"); }
+  playDamage() { this.play("damage"); }
+  playExplosion() { this.play("explosion"); }
+  playPlaceBomb() { this.play("placeBomb"); }
+}
+
+// Create a singleton instance
+let audioManager = null;
+const getAudioManager = () => {
+  if (!audioManager) {
+    audioManager = new AudioManager();
+  }
+  return audioManager;
+};
 
 /* ---------- helpers ---------- */
 
@@ -40,7 +126,6 @@ const isValidMap = (m) =>
   Array.isArray(m) && m.length > 0 && Array.isArray(m[0]);
 const myName = () => {
   const raw = (localStorage.getItem("bm_name") || "").trim();
-  // remove any surrounding ' or "
   return raw.replace(/^['"]+|['"]+$/g, "").trim();
 };
 const readSelfId = () => {
@@ -51,13 +136,11 @@ const readSelfId = () => {
   }
 };
 
-
-
 /* ---------- component ---------- */
 
 export default function Game() {
-  const [livesMap, setLivesMap] = useState({}); // id -> lives
-  const [iFrameUntil, setIFrameUntil] = useState(0); // invulnerability ms
+  const [livesMap, setLivesMap] = useState({});
+  const [iFrameUntil, setIFrameUntil] = useState(0);
   const [gameMap, setGameMap] = useState(() => generateMap());
   const [players, setPlayers] = useState([]);
   const [chatMessages, setChatMessages] = useState([]);
@@ -73,18 +156,37 @@ export default function Game() {
   const [mutedMap, setMutedMap] = useState({});
   const [gameOver, setGameOver] = useLocalStorageState("bm_gameover_v2",{});
   const [showInfo, setShowInfo] = useState(false);
- const [showSoundPanel, setShowSoundPanel] = useState(false);
- const [volumes, setVolumes] = useState({
-    gameMusic: 0.3,
-    soundEffects: 0.7,
-    voiceChat: 0.8
+  const [showSoundPanel, setShowSoundPanel] = useState(false);
+  
+  // Audio manager ref
+  const audioManagerRef = useRef(null);
+  if (!audioManagerRef.current) {
+    audioManagerRef.current = getAudioManager();
+  }
+  
+  // Initialize volumes with safe defaults
+  const [volumes, setVolumes] = useState(() => {
+    // Helper to safely parse volume from localStorage
+    const safeParse = (key, defaultValue) => {
+      try {
+        const saved = localStorage.getItem(key);
+        if (saved) {
+          const val = parseFloat(saved);
+          return !isNaN(val) && isFinite(val) && val >= 0 && val <= 1 ? val : defaultValue;
+        }
+      } catch {}
+      return defaultValue;
+    };
+    
+    return {
+      gameMusic: safeParse('bm_gameMusic_vol', 0.3),
+      soundEffects: safeParse('bm_sfx_vol', 0.7),
+      voiceChat: safeParse('bm_voice_vol', 0.8)
+    };
   });
   
+  // Audio refs
   const gameMusicRef = useRef(null);
-   const powerupSoundRef = useRef(null);
-const damageSoundRef = useRef(null);
-const explosionSoundRef = useRef(null); 
-const placeBombSoundRef = useRef(null); 
 
   // WebRTC refs
   const peersRef = useRef({});
@@ -111,7 +213,7 @@ const placeBombSoundRef = useRef(null);
     });
   }
   const rtc = rtcRef.current;
-  
+
   // Helper to get safe volume value
   const getSafeVolume = (value, defaultValue = 0.5) => {
     const num = Number(value);
@@ -132,10 +234,19 @@ const placeBombSoundRef = useRef(null);
           voiceChat: getSafeVolume(savedVoice, 0.8)
         };
         setVolumes(newVolumes);
-        // Update audio refs with loaded volumes
+        
+        // Update audio manager with loaded volume
+        if (audioManagerRef.current) {
+          audioManagerRef.current.setVolume(newVolumes.soundEffects);
+          audioManagerRef.current.setMuted(newVolumes.soundEffects === 0);
+        }
+        
+        // Update game music
         if (gameMusicRef.current) {
           gameMusicRef.current.volume = newVolumes.gameMusic;
         }
+        
+        // Update WebRTC audio volumes
         if (rtc?.setRemoteVolume) {
           rtc.setRemoteVolume(newVolumes.voiceChat);
         }
@@ -162,12 +273,11 @@ const placeBombSoundRef = useRef(null);
       gameMusicRef.current.volume = safeVolumes.gameMusic;
     }
     
-    // Update other sound refs
-    [powerupSoundRef, damageSoundRef, explosionSoundRef, placeBombSoundRef].forEach(ref => {
-      if (ref.current) {
-        ref.current.volume = safeVolumes.soundEffects;
-      }
-    });
+    // Update audio manager
+    if (audioManagerRef.current) {
+      audioManagerRef.current.setVolume(safeVolumes.soundEffects);
+      audioManagerRef.current.setMuted(safeVolumes.soundEffects === 0);
+    }
     
     // Update WebRTC audio volumes
     if (rtc?.setRemoteVolume) {
@@ -182,98 +292,22 @@ const placeBombSoundRef = useRef(null);
     } catch {}
   };
 
-  // Initialize sound refs
-  useEffect(() => {
-    const safeSfxVol = getSafeVolume(volumes.soundEffects, 0.7);
-    
-    if (!powerupSoundRef.current && typeof Audio !== "undefined") {
-      const a = new Audio("/audio/01-power-up-mario.mp3");
-      a.preload = "auto";
-      a.volume = safeSfxVol;
-      powerupSoundRef.current = a;
-    }
-  }, []);
+  // Sound playing functions using the audio manager
+  const playDamageSound = () => {
+    audioManagerRef.current?.playDamage();
+  };
 
-  useEffect(() => {
-    const safeSfxVol = getSafeVolume(volumes.soundEffects, 0.7);
-    
-    if (!damageSoundRef.current && typeof Audio !== "undefined") {
-      const a = new Audio("/audio/mario-damage.mp3");
-      a.preload = "auto";
-      a.volume = safeSfxVol;
-      damageSoundRef.current = a;
-    }
-  }, []);
+  const playPowerupSound = () => {
+    audioManagerRef.current?.playPowerup();
+  };
 
-  useEffect(() => {
-    const safeSfxVol = getSafeVolume(volumes.soundEffects, 0.7);
-    
-    if (!explosionSoundRef.current && typeof Audio !== "undefined") {
-      const a = new Audio("/audio/ExplosionSound.mp3");
-      a.preload = "auto";
-      a.volume = safeSfxVol;
-      explosionSoundRef.current = a;
-    }
-  }, []);
+  const playExplosionSound = () => {
+    audioManagerRef.current?.playExplosion();
+  };
 
-  useEffect(() => {
-    const safeSfxVol = getSafeVolume(volumes.soundEffects, 0.7);
-    
-    if (!placeBombSoundRef.current && typeof Audio !== "undefined") {
-      const a = new Audio("/audio/PlaceBombSound.mp3");
-      a.preload = "auto";
-      a.volume = safeSfxVol;
-      placeBombSoundRef.current = a;
-    }
-  }, []);
-
-  function playDamageSound() {
-    const a = damageSoundRef.current;
-    if (!a) return;
-    try {
-      a.currentTime = 0;
-      a.volume = getSafeVolume(volumes.soundEffects, 0.7);
-      a.play().catch(() => {});
-    } catch {}
-  }
-
-  function playPowerupSound() {
-    const a = powerupSoundRef.current;
-    if (!a) return;
-    try {
-      a.currentTime = 0;
-      a.volume = getSafeVolume(volumes.soundEffects, 0.7);
-      a.play().catch(() => {});
-    } catch {}
-  }
-
-  function playExplosionSound() {
-    const a = explosionSoundRef.current;
-    if (!a) return;
-    try {
-      a.currentTime = 0;
-      a.volume = getSafeVolume(volumes.soundEffects, 0.7);
-      a.play().catch(() => {});
-    } catch {}
-  }
-
-  function playPlaceBombSound() {
-    try {
-      const base = placeBombSoundRef.current;
-      const src = base?.src || "/audio/PlaceBombSound.mp3";
-      const a = new Audio(src);
-      a.volume = getSafeVolume(volumes.soundEffects, 0.7);
-      
-      const p = a.play();
-      if (p && typeof p.then === "function") {
-        p.catch((err) => {
-          console.warn("PlaceBomb sound play failed:", err);
-        });
-      }
-    } catch (err) {
-      console.error("PlaceBomb sound error:", err);
-    }
-  }
+  const playPlaceBombSound = () => {
+    audioManagerRef.current?.playPlaceBomb();
+  };
 
   function handleBombExplode(r, c, range = 1, explosionCells = null) {
     setBombExplosions([{ r, c, range, explosionCells }]);
@@ -282,7 +316,6 @@ const placeBombSoundRef = useRef(null);
     if (ws && ws.readyState === WebSocket.OPEN) {
       setTimeout(() => {
         ws.send(JSON.stringify({ type: "request-map" }));
-        // get postions after explosion
         ws.send(JSON.stringify({ type: "request-positions" }));
       }, 100);
     }
@@ -317,7 +350,6 @@ const placeBombSoundRef = useRef(null);
         setShowQuickChat(false);
         setShowSoundPanel(false);
         setQuickText("");
-        // Apply current mute states immediately when panel opens
         rtc?.syncMuteStatesToAudios?.(players, mutedMap);
       }
       return n;
@@ -356,18 +388,15 @@ const placeBombSoundRef = useRef(null);
     setChatInput("");
   }
 
-  // mute UX + state update
   function toggleMuted(name) {
     setMutedMap((prev) => {
       const next = { ...prev, [name]: !prev?.[name] };
-      // reflect change immediately in audio elements
       rtc?.syncMuteStatesToAudios?.(players, next);
       return next;
     });
   }
 
   /* ---------- powerup handling ---------- */
-  // 🔊 Start game music when this screen is mounted, stop when unmounted
   useEffect(() => {
     const audio = gameMusicRef.current;
     if (!audio) return;
@@ -375,9 +404,10 @@ const placeBombSoundRef = useRef(null);
     audio.loop = true;
     audio.volume = getSafeVolume(volumes.gameMusic, 0.3);
 
-    // Try to play immediately (Chrome/etc). Your global pointerdown handler
-    // will also call play() again if browser blocks autoplay.
-    audio.play().catch(() => {});
+    const playPromise = audio.play();
+    if (playPromise !== undefined) {
+      playPromise.catch(() => {});
+    }
 
     return () => {
       try {
@@ -387,7 +417,6 @@ const placeBombSoundRef = useRef(null);
     };
   }, [volumes.gameMusic]);
 
-  // powerup collection handler
   useEffect(() => {
     const ws = getSharedSocket();
     if (!ws) return;
@@ -408,7 +437,6 @@ const placeBombSoundRef = useRef(null);
             const playerData = safePrev[playerName] || {};
             const existingPowerups = playerData[powerupType] || [];
 
-            // new powerup with expiration
             const newPowerup = {
               collectedAt: Date.now(),
               expiresAt: expiresAt || Date.now() + POWERUP_DURATION_MS,
@@ -427,9 +455,6 @@ const placeBombSoundRef = useRef(null);
           if (playerName === myName()) {
             playPowerupSound();
           }
-
-          if (powerupType === "speed") {
-          }
         }
       } catch (error) {
         console.error("Error parsing powerup message:", error);
@@ -440,7 +465,6 @@ const placeBombSoundRef = useRef(null);
     return () => ws.removeEventListener("message", handleMessage);
   }, []);
 
-  // Timer to remove expired powerups, runs every second
   useEffect(() => {
     const interval = setInterval(() => {
       setPlayerPowerups((prev) => {
@@ -464,7 +488,6 @@ const placeBombSoundRef = useRef(null);
           Object.keys(playerData).forEach((powerupType) => {
             const powerups = playerData[powerupType];
             if (Array.isArray(powerups)) {
-              // Filter out expired powerups
               const active = powerups.filter((p) => p.expiresAt > now);
               if (active.length !== powerups.length) {
                 hasChanges = true;
@@ -475,7 +498,6 @@ const placeBombSoundRef = useRef(null);
             }
           });
 
-          // Remove player if no powerups left
           if (Object.keys(updated[playerName]).length === 0) {
             delete updated[playerName];
           }
@@ -527,6 +549,7 @@ const placeBombSoundRef = useRef(null);
       }
     });
   }
+
   const readSelfRC = () => {
     try {
       const s = sessionStorage.getItem("bm_self_rc");
@@ -563,22 +586,21 @@ const placeBombSoundRef = useRef(null);
     const cc = Math.max(0, Math.min(c ?? 0, cols ? cols - 1 : 0));
     return { r: rr, c: cc };
   }
+
   useEffect(() => {
     if (players && players.length && Array.isArray(players)) {
       reconcilePeers(players);
-      // keep audio mutes in sync as roster changes
       rtc?.syncMuteStatesToAudios?.(players, mutedMap);
     }
   }, [players]);
 
   function getPlayerCharacter() {
     const self = resolveSelfFromPlayers(players);
-    if (!self) return "mario"; // default fallback
-  
+    if (!self) return "mario";
     return self.character || "mario";
   }
 
-  /* ---------- autoplay resume (Safari/iOS) ---------- */
+  /* ---------- autoplay resume ---------- */
   useEffect(() => {
     const resume = () => {
       try {
@@ -640,7 +662,6 @@ const placeBombSoundRef = useRef(null);
         } catch {}
         rtc?.setMicState?.(false);
         if (list.length) rtc?.startVoiceMesh?.(list);
-        // ensure initial mute state applied to any early tracks
         rtc?.syncMuteStatesToAudios?.(list, mutedMap);
         return;
       }
@@ -676,7 +697,6 @@ const placeBombSoundRef = useRef(null);
           const playerData = prev[playerName] || {};
           const existingPowerups = playerData[powerupType] || [];
 
-          // new powerup with expiration
           const newPowerup = {
             collectedAt: Date.now(),
             expiresAt: expiresAt || Date.now() + POWERUP_DURATION_MS,
@@ -715,7 +735,6 @@ const placeBombSoundRef = useRef(null);
           Array.isArray(prev) ? [...prev, normalized] : [normalized]
         );
 
-        // toast animation
         setTimeout(() => {
           const el = document.querySelector(
             `[data-chat-id="${normalized.id}"]`
@@ -744,7 +763,6 @@ const placeBombSoundRef = useRef(null);
         return;
       }
 
-      // handle position updates
       if (msg.type === "all-positions") {
         const positions = msg.payload?.positions || {};
         setPlayerPositions(positions);
@@ -753,8 +771,6 @@ const placeBombSoundRef = useRef(null);
 
       if (msg.type === "player-move") {
         const { name, r, c, dir } = msg.payload;
-
-        // Update positions for PlayerSprites
         setPlayerPositions((prev) => ({
           ...prev,
           [name]: { r, c, dir },
@@ -762,33 +778,29 @@ const placeBombSoundRef = useRef(null);
         return;
       }
 
-      // Handle bomb placement from server
       if (msg.type === "bomb-placed") {
-        // The Bombs component will handle this via its own WebSocket listener
         return;
       }
+
       if (msg.type === "bomb-explode") {
         const { r, c, range = 1, explosionCells } = msg.payload || {};
         if (typeof r === "number" && typeof c === "number") {
           handleBombExplode(r, c, range, explosionCells);
 
-          // hit detection
           const now = Date.now();
           if (now >= iFrameUntil) {
             const rc = getSelfRCNow();
             const cells =
               Array.isArray(explosionCells) && explosionCells.length
                 ? explosionCells
-                : []; // if server sent none
+                : [];
 
             if (
               rc &&
               cells.some((cell) => cell.r === rc.r && cell.c === rc.c)
             ) {
-              // temporary i-frames to avoid multiple hits from same blast
               setIFrameUntil(now + 700);
 
-              // ask server to decrement my life
               const ws2 = getSharedSocket();
               if (ws2 && ws2.readyState === WebSocket.OPEN) {
                 ws2.send(
@@ -803,7 +815,7 @@ const placeBombSoundRef = useRef(null);
         }
         return;
       }
-      // initial lives snapshot
+
       if (msg.type === "lives-bulk") {
         const pack = Array.isArray(msg.payload) ? msg.payload : [];
         const next = {};
@@ -814,7 +826,6 @@ const placeBombSoundRef = useRef(null);
         return;
       }
 
-      // single update
       if (msg.type === "lives-update") {
         const { id, lives } = msg.payload || {};
         if (typeof id === "number" || typeof id === "string") {
@@ -823,26 +834,21 @@ const placeBombSoundRef = useRef(null);
         return;
       }
 
-      // someone died
       if (msg.type === "player-dead") {
         const deadId = msg.payload?.id;
         const deadName = msg.payload?.name;
 
-        // Update lives to 0 in case it's not already
         setLives(deadId, 0);
 
-        // If this is *you*, switch to spectator mode
         const self = resolveSelfFromPlayers(players);
         if (self && self.id === deadId) {
           showError("💀 You have died! Spectating other players...");
-          // Mark player as spectator locally
           setPlayers((prev) =>
             prev.map((p) =>
               p.id === deadId ? { ...p, dead: true, isSpectator: true } : p
             )
           );
         } else {
-          // For others, just mark them dead for rendering purposes
           setPlayers((prev) =>
             prev.map((p) =>
               p.id === deadId ? { ...p, dead: true, isSpectator: true } : p
@@ -854,7 +860,7 @@ const placeBombSoundRef = useRef(null);
 
       if (msg.type === "game-over") {
         setGameOver(msg.payload.winner||{name:"Unknown"});
-          try {
+        try {
           const a = gameMusicRef.current;
           if (a) {
             a.pause();
@@ -930,7 +936,6 @@ const placeBombSoundRef = useRef(null);
     }
   }, [showQuickChat]);
 
-  // keep audio elements synced with either state change
   useEffect(() => {
     rtc?.syncMuteStatesToAudios?.(players, mutedMap);
   }, [mutedMap, players]);
@@ -941,6 +946,7 @@ const placeBombSoundRef = useRef(null);
       const typing = isTypingTarget(e.target);
 
       if (showQuickChat || typing) return;
+      
       if (k === " " || k === "b") {
         e.preventDefault();
         e.stopPropagation();
@@ -962,7 +968,6 @@ const placeBombSoundRef = useRef(null);
 
   useEffect(() => {
     if (bombExplosions.length > 0) {
-      // Clear after a short delay to ensure they're processed
       const timer = setTimeout(() => {
         setBombExplosions([]);
       }, 100);
@@ -970,33 +975,30 @@ const placeBombSoundRef = useRef(null);
     }
   }, [bombExplosions]);
 
-function setLives(id, lives) {
-  let v = Number(lives);
-  if (!Number.isFinite(v)) v = 3;
-  v = Math.max(0, Math.min(3, v)); // clamp to [0..3]
+  function setLives(id, lives) {
+    let v = Number(lives);
+    if (!Number.isFinite(v)) v = 3;
+    v = Math.max(0, Math.min(3, v));
 
-  setLivesMap((prev) => {
-    const prevVal = prev && typeof prev === "object" ? prev[id] : undefined;
-    const nextState = { ...prev, [id]: v };
+    setLivesMap((prev) => {
+      const prevVal = prev && typeof prev === "object" ? prev[id] : undefined;
+      const nextState = { ...prev, [id]: v };
 
-    // if this is ME and my lives went down, play damage sound
-    const selfId = readSelfId();
-    if (
-      selfId != null &&
-      String(selfId) === String(id) &&
-      typeof prevVal === "number" &&
-      v < prevVal
-    ) {
-      playDamageSound();
-    }
+      const selfId = readSelfId();
+      if (
+        selfId != null &&
+        String(selfId) === String(id) &&
+        typeof prevVal === "number" &&
+        v < prevVal
+      ) {
+        playDamageSound();
+      }
 
-    return nextState;
-  });
-}
-
+      return nextState;
+    });
+  }
 
   function getSelfRCNow() {
-    // prefer live players, fallback to sessionStorage
     const self = resolveSelfFromPlayers(players);
     if (self && typeof self.r === "number" && typeof self.c === "number")
       return { r: self.r, c: self.c };
@@ -1005,19 +1007,17 @@ function setLives(id, lives) {
   }
 
   useEffect(() => {
-  const handleBackButton = (event) => {
-    // Simply prevent the default back behavior
+    const handleBackButton = (event) => {
+      window.history.pushState(null, null, window.location.href);
+    };
+
     window.history.pushState(null, null, window.location.href);
-  };
+    window.addEventListener('popstate', handleBackButton);
 
-  // Push initial state and set up listener
-  window.history.pushState(null, null, window.location.href);
-  window.addEventListener('popstate', handleBackButton);
-
-  return () => {
-    window.removeEventListener('popstate', handleBackButton);
-  };
-}, []);
+    return () => {
+      window.removeEventListener('popstate', handleBackButton);
+    };
+  }, []);
 
   return h(
     "div",
@@ -1032,26 +1032,25 @@ function setLives(id, lives) {
         background-attachment: fixed;
       `,
     },
-        h("audio", {
+    h("audio", {
       src: "/audio/GameSound.mp3",
       ref: gameMusicRef,
-      autoplay: true,   // will be handled & resumed by your pointerdown effect
+      autoplay: true,
       loop: true,
       id: "game-music-audio"
     }),
+    
     useErrorPopup(),
     h(
       "div",
       {
         class: "flex flex-col items-center flex-1 py-4",
       },
-
       MapGrid({
         gameMap,
         children: h(
           "div",
           null,
-
           Bombs({
             gameMap,
             players,
@@ -1062,13 +1061,9 @@ function setLives(id, lives) {
             renderLayer: true,
             renderButton: false,
             onBombExplode: handleBombExplode,
-            onPlaceBomb: playPlaceBombSound,  
+            onPlaceBomb: playPlaceBombSound,
           }),
-
-          // Powerups on map
           PowerupsUI({ gameMap }),
-
-          // Explosions
           Array.isArray(gameMap) && gameMap.length > 0
             ? Explosions({
                 gameMap,
@@ -1076,16 +1071,12 @@ function setLives(id, lives) {
                 bombExplosions,
               })
             : null,
-
-          // Player sprites
           PlayerSprites({
             gameMap,
             players,
             selfName: myName(),
             playerPositions,
           }),
-
-          // My player
           (() => {
             const self = resolveSelfFromPlayers(players);
             if (!self || self.dead || self.isSpectator) return null;
@@ -1093,14 +1084,12 @@ function setLives(id, lives) {
           })()
         ),
       }),
-
       PowerUpsSection({
         playerPowerups,
         selfName: myName(),
         key: `powerups-${myName()}`,
       })
     ),
-
     Bombs({
       gameMap,
       players,
@@ -1110,9 +1099,8 @@ function setLives(id, lives) {
       disableHotkey: showQuickChat,
       renderLayer: false,
       renderButton: true,
-      onPlaceBomb: playPlaceBombSound, 
+      onPlaceBomb: playPlaceBombSound,
     }),
-
     RightRail({
       toggleQuickChat,
       toggleAudioPanel,
@@ -1122,7 +1110,6 @@ function setLives(id, lives) {
         await rtc?.setMicState?.(next);
       },
     }),
-
     showQuickChat
       ? QuickChatPopover({
           quickText,
@@ -1131,7 +1118,6 @@ function setLives(id, lives) {
           onClose: closeQuickChat,
         })
       : null,
-
     showAudioPanel
       ? AudioPanel({
           players,
@@ -1140,7 +1126,13 @@ function setLives(id, lives) {
           selfName: myName(),
         })
       : null,
-    
+    showInfo
+      ? InfoOverlay({
+          open: showInfo,
+          onClose: () => setShowInfo(false),
+          playerCharacter: getPlayerCharacter()
+        })
+      : null,
     showSoundPanel
       ? SoundPanel({
           open: showSoundPanel,
@@ -1148,8 +1140,6 @@ function setLives(id, lives) {
           onVolumeChange: updateAudioVolumes
         })
       : null,
-    
-    // Sound panel button
     h(
       "button",
       {
@@ -1174,14 +1164,6 @@ function setLives(id, lives) {
         "🔊"
       )
     ),
-    
-    showInfo
-      ? InfoOverlay({
-          open: showInfo,
-          onClose: () => setShowInfo(false),
-          playerCharacter: getPlayerCharacter()
-        })
-      : null,
     h(
       "button",
       {
