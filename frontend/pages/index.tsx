@@ -8,6 +8,8 @@ import { User, UserProfile } from "@/types/user";
 import { toast, ToastContainer } from 'react-toastify';
 import { Plus, X } from "lucide-react";
 import Head from "next/head";
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8080";
 
 type Post = {
   user_id: string;
@@ -711,15 +713,17 @@ export default function HomePage() {
   };
 
   // mark a DM notification as read by message id
-  const markReadByMessage = (messageId: string) => {
-    if (!messageId) return;
-    fetch('/api/notifications/read-by-message', {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messageId }),
-    }).catch(() => { });
-  };
+// mark a DM notification as read by message id
+const markReadByMessage = (messageId: string) => {
+  if (!messageId) return;
+  fetch(`${API_BASE}/api/notifications/read-by-message`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ messageId }),
+  }).catch(() => {});
+};
+
   function resolveSenderName(fromId: string, content: any): string {
     const u = users.find(u => String(u.id) === String(fromId));
 

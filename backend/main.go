@@ -153,6 +153,22 @@ func main() {
 			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 		}
 	}))
+	// --- Notifications API ---
+http.HandleFunc("/api/notifications/unread-count",
+    corsHandler(wsServer.GetUnreadCount))
+
+http.HandleFunc("/api/notifications/read-by-message",
+    corsHandler(wsServer.ReadByMessageID))
+
+http.HandleFunc("/api/notifications/", corsHandler(func(w http.ResponseWriter, r *http.Request) {
+    // Expecting: POST /api/notifications/{id}/read
+    if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/read") {
+        wsServer.ReadNotification(w, r)
+        return
+    }
+    http.NotFound(w, r)
+}))
+
 http.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
     w.WriteHeader(http.StatusOK)
     _, _ = w.Write([]byte("ok"))

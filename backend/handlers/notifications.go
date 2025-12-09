@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -54,18 +55,33 @@ func (s *Server) GetUnreadCount(w http.ResponseWriter, r *http.Request) {
 }
 
 // POST /api/notifications/:id/read
+// POST /api/notifications/:id/read
 func (s *Server) ReadNotification(w http.ResponseWriter, r *http.Request) {
 	uid, err := s.UserIDFromRequest(r)
-	if err != nil || uid == "" { http.Error(w, "unauthorized", 401); return }
-	id := r.PathValue("id") // Go 1.22 mux; otherwise parse yourself
-	if id == "" { http.Error(w, "bad id", 400); return }
+	if err != nil || uid == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// URL is /api/notifications/{id}/read
+	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(parts) < 3 {
+		http.Error(w, "bad id", http.StatusBadRequest)
+		return
+	}
+	id := parts[2]
+
 	_, _ = s.DB.Exec(`UPDATE notifications SET is_read=1 WHERE id=? AND recipient_id=?`, id, uid)
 
 	// respond with fresh count and also push new badge value
 	n, _ := unreadCount(s.DB, uid)
 	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "unread": n})
-	s.Hub.SendToUser(uid, map[string]any{"type": "badge.unread", "data": map[string]any{"count": n}})
+	s.Hub.SendToUser(uid, map[string]any{
+		"type": "badge.unread",
+		"data": map[string]any{"count": n},
+	})
 }
+
 
 // POST /api/notifications/read-by-message
 // convenience: auto-clear a DM notification by messageId when the user is in that chat

@@ -10,16 +10,21 @@ import { useErrorPopup, showError } from "../components/ErrorPopup.js";
 const host = window.location.hostname;
 const WS_PORT = 8081;
 
-// For localhost dev, ALWAYS use plain ws://
-// (only use wss:// if one day you put the game behind HTTPS with TLS)
-const WS_URL =
+// Figure out which logical lobby we are in:
+// - Invite links: /bombermario?roomId=302e...
+// - Public route: /bombermario  → "public"
+const urlParams = new URLSearchParams(window.location.search);
+const ROOM_ID = urlParams.get("roomId") || "public";
+
+// Base WS URL (no query)
+const BASE_WS_URL =
   host === "localhost" || host === "127.0.0.1"
     ? `ws://${host}:${WS_PORT}`
     : `wss://${host}:${WS_PORT}`;
-const urlParams = new URLSearchParams(window.location.search);
-// Example: /lobby?room=A or /lobby?lobby=room-1
-const LOBBY_ID =
-  urlParams.get("room") || urlParams.get("lobby") || "default";
+
+// FINAL WS URL with ?roomId=...
+const WS_URL = `${BASE_WS_URL}?roomId=${encodeURIComponent(ROOM_ID)}`;
+
 
 const characters = {
   mario: { name: "Mario", icon: "./assets/Characters/icons/Mario.png" },
@@ -116,7 +121,7 @@ export default function BomberMario() {
       ws.send(
         JSON.stringify({
           type: "join",
-          payload: {lobbyId: LOBBY_ID, name: nickname, character: selectedChar },
+    payload: { lobbyId: ROOM_ID, name: nickname, character: selectedChar },
         })
       );
       setJoined(true);
@@ -185,7 +190,11 @@ export default function BomberMario() {
     } catch {}
 
     setTimeout(() => {
-      navigate("/game");
+      try {
+  sessionStorage.setItem("bm_fromLobby", "1");
+} catch {}
+navigate("/game");
+
       console.log("START payload:", msg.payload);
     }, 200);
   }
@@ -466,7 +475,7 @@ export default function BomberMario() {
             "flex justify-between items-center text-[0.55rem] text-gray-400",
         },
         h("div", {}, `Connection: ${status}`),
-        h("div", {}, `Lobby: ${LOBBY_ID}`)
+h("div", {}, `Lobby: ${ROOM_ID}`)
       )
     ),
 

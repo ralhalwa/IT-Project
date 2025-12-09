@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import ProfileCard from "@/components/profile/ProfileCard";
-import { X, Search, Lock, Plus } from "lucide-react";
+import { X, Search, Lock, Plus, Gamepad2 } from "lucide-react";
 import Avatar from "@/components/ui/avatar";
 import Navbar from "@/components/ui/navbar";
 import {
@@ -28,6 +28,7 @@ import PostCreateForm from "@/components/groups/posts/PostCreateForm";
 import CreatePostModal from "@/components/groups/posts/PostCreateForm";
 import type { GroupPostFormType } from "@/components/groups/posts/PostCreateForm";
 import Head from "next/head";
+import { GAME_INVITE_PREFIX, GameInvitePayload } from "@/types/gameInvite";
 
 type GroupTab = 'posts' | 'events' | 'chat';
 const TABS: GroupTab[] = ['chat', 'posts', 'events'];
@@ -41,6 +42,15 @@ const MAX_GROUP_TITLE_LENGTH = 20;
 const MAX_GROUP_DESCRIPTION_LENGTH = 200;
 const MAX_GROUP_MEMBERS = 50;
 const MIN_GROUP_MEMBERS = 1;
+// const GAME_INVITE_PREFIX = "__GAME_INVITE__:";
+
+// type GameInvitePayload = {
+//   url: string;
+//   fromId: string;
+//   toId?: string;
+//   groupId?: string;
+//   createdAt: string;
+// };
 
 /** ---------- TEMP FEATURE FLAG ---------- **/
 // Set this to false when your real follow/public logic is ready.
@@ -51,6 +61,23 @@ const UNLOCK_ALL = false;
 //find types in types folder
 
 /** Small helpers */
+// Safe UUID generator for all browsers
+const makeId = (): string => {
+  // Modern browsers
+  if (typeof window !== "undefined" &&
+      window.crypto &&
+      typeof window.crypto.randomUUID === "function") {
+    return window.crypto.randomUUID();
+  }
+
+  // Fallback: RFC4122-ish v4 style using Math.random
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+};
+
 const cls = (...a: (string | false | undefined)[]) =>
   a.filter(Boolean).join(" ");
 const relTime = (iso: string) => {
@@ -160,6 +187,82 @@ export default function MessagesPage() {
   const [ViewingProfile, setViewingProfile] = useState<UserProfile | null>(
     null
   );
+const handleGameClick = () => {
+  if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+  if (!meId) return;
+
+  const createdAt = new Date().toISOString();
+const roomId = makeId();
+
+  // --- DM invite ---
+  if (tab === "direct" && selectedUser) {
+    const url = `/bombermario?roomId=${encodeURIComponent(
+      roomId
+    )}&peerId=${encodeURIComponent(String(selectedUser.id))}#/lobby`;
+
+    const payload: GameInvitePayload = {
+      url,
+      fromId: String(meId),
+      toId: String(selectedUser.id),
+      createdAt,
+      roomId,
+    };
+
+    const text = GAME_INVITE_PREFIX + JSON.stringify(payload);
+const clientId = makeId();
+
+    wsRef.current.send(
+      JSON.stringify({
+        type: "dm",
+        data: { to: selectedUser.id, text, clientId },
+      })
+    );
+
+    setDraft("");
+    setShowEmoji(false);
+    return;
+  }
+
+  // --- Group invite ---
+  if (tab === "groups" && selectedGroup && selectedGroup.is_member) {
+    const gid = String(selectedGroup.id);
+
+    const url = `/bombermario?roomId=${encodeURIComponent(
+      roomId
+    )}&groupId=${encodeURIComponent(gid)}#/lobby`;
+
+    const payload: GameInvitePayload = {
+      url,
+      fromId: String(meId),
+      groupId: gid,
+      createdAt,
+      roomId,
+    };
+
+    const text = GAME_INVITE_PREFIX + JSON.stringify(payload);
+const clientId = makeId();
+
+    wsRef.current.send(
+      JSON.stringify({
+        type: "group_message",
+        data: {
+          groupId: gid,
+          group_id: gid,
+          text,
+          clientId,
+        },
+      })
+    );
+
+    setDraft("");
+    setShowEmoji(false);
+  }
+};
+
+
+
+
+
   const handleProfileClick = async (userId: string) => {
     try {
       const res = await fetch(`/api/users/${userId}`);
@@ -798,7 +901,7 @@ export default function MessagesPage() {
           const m = env.data as { id?: string; from?: string; sender_id?: string; group_id?: string; groupId?: string; text?: string; content?: string; ts?: string; sent_at?: string; firstName?: string; lastName?: string; nickname?: string; avatar?: string }
 
           const mapped: Msg = {
-            id: String(m.id ?? crypto.randomUUID()),
+            id: String(m.id ?? makeId()),
             from: String(m.from ?? m.sender_id ?? ''),
             groupId: String(m.groupId ?? m.group_id ?? ''),
             text: String(m.text ?? m.content ?? ''),
@@ -1177,7 +1280,7 @@ export default function MessagesPage() {
     }
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
 
-    const clientId = crypto.randomUUID();
+const clientId = makeId();
     const nowIso = new Date().toISOString();
 
     // 1) tell the peer we stopped typing
@@ -1609,7 +1712,7 @@ export default function MessagesPage() {
       })
     );
 
-    const clientId = crypto.randomUUID();
+const clientId = makeId();
     const nowIso = new Date().toISOString();
 
     // Send group message
@@ -2483,6 +2586,14 @@ export default function MessagesPage() {
                         </div>
                       )}
                     </div>
+                     <button
+    type="button"
+    onClick={handleGameClick}
+    className="px-3 py-2 rounded-xl bg-[#232323] border border-[rgba(255,255,255,.12)] hover:border-[rgba(0,255,255,.35)] hover:-translate-y-[1px] transition flex items-center justify-center"
+    title="Play game together"
+  >
+    <Gamepad2 className="w-5 h-5" />
+  </button>
 
                     {/* Textarea */}
                     <textarea

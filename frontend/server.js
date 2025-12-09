@@ -681,10 +681,19 @@ function broadcastChat(lobby, from, text) {
 }
 
 // ---- Connection handling ----
-wss.on("connection", (ws) => {
+wss.on("connection", (ws, req) => {
   ws._created = Date.now();
-  log("Client connected");
+  // log("Client connected");
+ let roomId = "default";
+  try {
+    const url = new URL(req.url || "/", "http://localhost");
+    roomId = url.searchParams.get("roomId") || "default";
+  } catch {
+    roomId = "default";
+  }
+  ws._roomId = roomId;
 
+  log(`Client connected (roomId=${roomId})`);
   // At first we don't know the lobby; send empty lobby snapshot
   sendTo(ws, {
     type: "lobby",
@@ -706,83 +715,85 @@ wss.on("connection", (ws) => {
     const { type, payload } = msg;
 
     if (type === "join") {
-      const requestedLobbyId = payload?.lobbyId || "default";
-      let lobby = getLobby(requestedLobbyId);
+  // Base lobby = roomId from URL; fallback to payload.lobbyId; then "default"
+  const baseLobbyId = ws._roomId || payload?.lobbyId || "default";
+  let lobby = getLobby(baseLobbyId);
 
-      // If lobby is marked in-progress but empty, reset it
-      if (lobby.players.size === 0 && lobby.gameInProgress) {
-        log(
-          `Lobby[${lobby.id}] All players disconnected previously. Ending game flag.`
-        );
-        lobby.gameInProgress = false;
-      }
+  // If lobby is marked in-progress but empty, reset it
+  if (lobby.players.size === 0 && lobby.gameInProgress) {
+    log(
+      `Lobby[${lobby.id}] All players disconnected previously. Ending game flag.`
+    );
+    lobby.gameInProgress = false;
+  }
 
-      // If this lobby is busy (in progress or full), redirect to another lobby
-      if (lobby.gameInProgress || lobby.players.size >= MAX_PLAYERS_PER_LOBBY) {
-        log(
-          `Lobby[${lobby.id}] busy (inProgress=${lobby.gameInProgress}, players=${lobby.players.size}). ` +
-          `Finding/creating another lobby for ${payload?.name || "unknown"}...`
-        );
-        lobby = findOrCreateLobbyWithSpace(requestedLobbyId);
-      }
+  // If this lobby is busy (in progress or full), redirect to another lobby
+  if (lobby.gameInProgress || lobby.players.size >= MAX_PLAYERS_PER_LOBBY) {
+    log(
+      `Lobby[${lobby.id}] busy (inProgress=${lobby.gameInProgress}, players=${lobby.players.size}). ` +
+        `Finding/creating another lobby for ${payload?.name || "unknown"}...`
+    );
+    lobby = findOrCreateLobbyWithSpace(baseLobbyId);
+  }
 
-      let requested = payload?.name
-        ? String(payload.name).slice(0, 32).trim()
-        : "";
-      if (!requested) requested = `p${lobby.nextId}`;
-      const character = payload?.character || "mario";
+  let requested = payload?.name
+    ? String(payload.name).slice(0, 32).trim()
+    : "";
+  if (!requested) requested = `p${lobby.nextId}`;
+  const character = payload?.character || "mario";
 
-      const taken = Array.from(lobby.players.values()).some(
-        (p) => p.name.toLowerCase() === requested.toLowerCase()
-      );
-      if (taken) {
-        sendTo(ws, { type: "error", message: "Nickname already taken" });
-        return;
-      }
+  const taken = Array.from(lobby.players.values()).some(
+    (p) => p.name.toLowerCase() === requested.toLowerCase()
+  );
+  if (taken) {
+    sendTo(ws, { type: "error", message: "Nickname already taken" });
+    return;
+  }
 
-      if (requested.length < 3 || requested.length > 8) {
-        sendTo(ws, {
-          type: "error",
-          message: "Nickname has to be between 3-8 characters",
-        });
-        return;
-      }
+  if (requested.length < 3 || requested.length > 8) {
+    sendTo(ws, {
+      type: "error",
+      message: "Nickname has to be between 3-8 characters",
+    });
+    return;
+  }
 
-      if (requested.includes(" ")) {
-        sendTo(ws, {
-          type: "error",
-          message: "Nickname cannot contain spaces",
-        });
-        return;
-      }
+  if (requested.includes(" ")) {
+    sendTo(ws, {
+      type: "error",
+      message: "Nickname cannot contain spaces",
+    });
+    return;
+  }
 
-      const id = lobby.nextId++;
-      ws._id = id;
-      ws._lobbyId = lobby.id;
+  const id = lobby.nextId++;
+  ws._id = id;
+  ws._lobbyId = lobby.id;
 
-      lobby.players.set(ws, {
-        id,
-        name: requested,
-        character,
-        joinedAt: Date.now(),
-      });
-      lobby.idToWs.set(id, ws);
-      lobby.playerLives.set(id, 3);
-      lobby.playerStatus.set(id, "alive");
-      lobbyOfWs.set(ws, lobby);
+  lobby.players.set(ws, {
+    id,
+    name: requested,
+    character,
+    joinedAt: Date.now(),
+  });
+  lobby.idToWs.set(id, ws);
+  lobby.playerLives.set(id, 3);
+  lobby.playerStatus.set(id, "alive");
+  lobbyOfWs.set(ws, lobby);
 
-      broadcastToLobby(lobby, {
-        type: "lives-update",
-        payload: { id, lives: 3, reason: "join" },
-      });
+  broadcastToLobby(lobby, {
+    type: "lives-update",
+    payload: { id, lives: 3, reason: "join" },
+  });
 
-      log(
-        `Player join: ${requested} as ${character} (id=${id}) in lobby=${lobby.id}, total=${lobby.players.size}`
-      );
-      broadcastLobby(lobby);
-      evaluateCountdownRules(lobby);
-      return;
-    }
+  log(
+    `Player join: ${requested} as ${character} (id=${id}) in lobby=${lobby.id}, total=${lobby.players.size}`
+  );
+  broadcastLobby(lobby);
+  evaluateCountdownRules(lobby);
+  return;
+}
+
 
     // All other messages need a lobby
     const lobby = lobbyOfWs.get(ws);

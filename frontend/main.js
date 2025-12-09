@@ -32,7 +32,7 @@ const safe = (viewFn) => {
 const routes = {
   // default route when hash is "#/" (or when router normalizes to "/")
   "/": () => safe(BomberMario),
-
+"/lobby": () => safe(BomberMario), 
   // explicit route for "#/bombermario"
   "/bombermario": () => safe(BomberMario),
 
