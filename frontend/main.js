@@ -3,7 +3,7 @@ import { h } from "./framework/dom.js";
 import { createRouter } from "./framework/router.js";
 
 import BomberMario from "./game/Pages/BomberMario.js";
-import Game from "./game/Pages/Game.js";
+import Game from "./game/Pages/game.js";
 import NotFound from "./game/Pages/404.js";
 import { GameOverScreen } from "./game/components/GameOverScreen.js"; 
 

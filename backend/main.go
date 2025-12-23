@@ -153,21 +153,50 @@ func main() {
 			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 		}
 	}))
-	// --- Notifications API ---
+// --- Notifications API ---
+
+// GET /api/notifications/unread-count
 http.HandleFunc("/api/notifications/unread-count",
     corsHandler(wsServer.GetUnreadCount))
 
+// POST /api/notifications/read-by-message
 http.HandleFunc("/api/notifications/read-by-message",
     corsHandler(wsServer.ReadByMessageID))
 
+// GET /api/notifications   (LIST)
+// POST /api/notifications/read-all  (MARK ALL READ)
+http.HandleFunc("/api/notifications", corsHandler(func(w http.ResponseWriter, r *http.Request) {
+    switch r.Method {
+    case http.MethodGet:
+        wsServer.ListNotifications(w, r)   // NEW
+        return
+    case http.MethodPost:
+        // optional if you want POST /api/notifications for something else
+        http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+        return
+    default:
+        http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+        return
+    }
+}))
+
+http.HandleFunc("/api/notifications/read-all", corsHandler(func(w http.ResponseWriter, r *http.Request) {
+    if r.Method == http.MethodPost {
+        wsServer.ReadAllNotifications(w, r) // NEW
+        return
+    }
+    http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+}))
+
+// Keep your existing dynamic route for: POST /api/notifications/{id}/read
 http.HandleFunc("/api/notifications/", corsHandler(func(w http.ResponseWriter, r *http.Request) {
-    // Expecting: POST /api/notifications/{id}/read
     if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/read") {
         wsServer.ReadNotification(w, r)
         return
     }
     http.NotFound(w, r)
 }))
+
 
 http.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
     w.WriteHeader(http.StatusOK)

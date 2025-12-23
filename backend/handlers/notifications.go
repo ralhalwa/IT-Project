@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -102,4 +103,82 @@ func (s *Server) ReadByMessageID(w http.ResponseWriter, r *http.Request) {
 	n, _ := unreadCount(s.DB, uid)
 	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "unread": n})
 	s.Hub.SendToUser(uid, map[string]any{"type": "badge.unread", "data": map[string]any{"count": n}})
+}
+// GET /api/notifications?limit=30&before=123
+func (s *Server) ListNotifications(w http.ResponseWriter, r *http.Request) {
+	uid, err := s.UserIDFromRequest(r)
+	if err != nil || uid == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	limit := 30
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, e := strconv.Atoi(v); e == nil && n > 0 && n <= 100 {
+			limit = n
+		}
+	}
+
+	before := int64(0)
+	if v := r.URL.Query().Get("before"); v != "" {
+		if n, e := strconv.ParseInt(v, 10, 64); e == nil {
+			before = n
+		}
+	}
+
+	query := `
+		SELECT id, recipient_id, type, content, is_read, created_at
+		FROM notifications
+		WHERE recipient_id = ?
+	`
+	args := []any{uid}
+
+	if before > 0 {
+		query += ` AND id < ?`
+		args = append(args, before)
+	}
+
+	query += ` ORDER BY id DESC LIMIT ?`
+	args = append(args, limit)
+
+	rows, err := s.DB.Query(query, args...)
+	if err != nil {
+		http.Error(w, "db error", 500)
+		return
+	}
+	defer rows.Close()
+
+	out := []Notification{}
+	for rows.Next() {
+		var n Notification
+		var contentStr string
+		if err := rows.Scan(&n.ID, &n.RecipientID, &n.Type, &contentStr, &n.IsRead, &n.CreatedAt); err == nil {
+			n.Content = json.RawMessage(contentStr)
+			out = append(out, n)
+		}
+	}
+
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"ok": true,
+		"items": out,
+	})
+}
+// POST /api/notifications/read-all
+func (s *Server) ReadAllNotifications(w http.ResponseWriter, r *http.Request) {
+	uid, err := s.UserIDFromRequest(r)
+	if err != nil || uid == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	_, _ = s.DB.Exec(`UPDATE notifications SET is_read=1 WHERE recipient_id=?`, uid)
+
+	n, _ := unreadCount(s.DB, uid)
+	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "unread": n})
+
+	// update badge everywhere
+	s.Hub.SendToUser(uid, map[string]any{
+		"type": "badge.unread",
+		"data": map[string]any{"count": n},
+	})
 }
