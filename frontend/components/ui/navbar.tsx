@@ -174,9 +174,18 @@ export default function Navbar({ user }: NavbarProps) {
         </Link>
       </div>
 
-      <div className="absolute left-1/2 -translate-x-1/2 pointer-events-none">
-        <div className="font-extrabold max-sm:text-xl tracking-[0.4px] brand-title">BomberNet 🎮</div>
-      </div>
+<div className="absolute left-1/2 -translate-x-1/2 pointer-events-none">
+  {/* Desktop / Tablet */}
+  <div className="hidden sm:block font-extrabold tracking-[0.4px] brand-title">
+    BomberNet 🎮
+  </div>
+
+  {/* Mobile */}
+<div className="block sm:hidden font-extrabold text-xl brand-title hover:drop-shadow-[0_0_6px_#00ffcc] transition">
+  🎮
+</div>
+</div>
+
 
       <div className="flex items-center max-sm:gap-0 gap-2 ml-auto">
         {user.id && (

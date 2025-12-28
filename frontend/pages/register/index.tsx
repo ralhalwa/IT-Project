@@ -1,12 +1,13 @@
+"use client";
+
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import Head from "next/head";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/router";
-import { useEffect } from "react";
 import StepProgress from "@/components/StepProgress";
 import ShinyLink from "@/components/ShinyLink";
 import GradientButton from "@/components/GradientButton";
@@ -71,23 +72,29 @@ export default function SignupPage() {
     form.lastName &&
     form.dateOfBirth;
 
-    const today = new Date().toISOString().split('T')[0];
+  const today = new Date().toISOString().split("T")[0];
 
   return (
     <>
       <Head>
         <title>Sign Up</title>
       </Head>
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-bl from-black to-gray-900 ">
+
+      {/* ✅ Mobile-safe page padding */}
+      <div className="min-h-screen w-full bg-gradient-to-bl from-black to-gray-900 px-3 sm:px-6 py-8 flex items-center justify-center">
         <motion.div
           initial={{ opacity: 0, y: 40 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6 }}
+          className="w-full flex justify-center"
         >
-          <Card className="w-full max-w-xl p-6 bg-white/10 backdrop-blur-md border border-white/20 text-white rounded-xl shadow-xl">
+          {/* ✅ Responsive card padding */}
+          <Card className="w-full max-w-xl p-4 sm:p-6 bg-white/10 backdrop-blur-md border border-white/20 text-white rounded-2xl shadow-xl">
             <CardHeader>
               <StepProgress step={step} />
-              <CardTitle className="text-3xl text-center">
+
+              {/* ✅ Responsive title size */}
+              <CardTitle className="text-2xl sm:text-3xl text-center">
                 {step === 1 ? (
                   <GradientText
                     colors={[
@@ -121,19 +128,22 @@ export default function SignupPage() {
                 )}
               </CardTitle>
             </CardHeader>
+
             <CardContent>
               <AnimatePresence>
                 {error && (
                   <motion.div
                     initial={{ opacity: 0, y: -10 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.3 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    transition={{ duration: 0.25 }}
                     className="mb-4 p-3 rounded-lg bg-red-500/20 border border-red-400 text-red-200 text-center text-sm"
                   >
                     {error}
                   </motion.div>
                 )}
               </AnimatePresence>
+
               {step === 1 ? (
                 <form
                   className="space-y-4"
@@ -142,7 +152,8 @@ export default function SignupPage() {
                     if (isMandatoryFilled()) setStep(2);
                   }}
                 >
-                  <div className="grid grid-cols-2 gap-4">
+                  {/* ✅ 1 column on mobile, 2 on desktop */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                     <div>
                       <Input
                         name="firstName"
@@ -151,7 +162,7 @@ export default function SignupPage() {
                         required
                         onChange={handleChange}
                         className="bg-white/20 text-white border-white/30 placeholder:text-[#e6e6e6df] placeholder:text-center focus:ring-purple-500 focus:placeholder:text-white focus:placeholder:scale-110 focus:placeholder:transition-transform focus:placeholder:duration-300"
-                        autoComplete="of"
+                        autoComplete="off"
                         maxLength={10}
                       />
                     </div>
@@ -163,11 +174,12 @@ export default function SignupPage() {
                         required
                         onChange={handleChange}
                         className="bg-white/20 text-white border-white/30 placeholder:text-[#e6e6e6df] placeholder:text-center focus:ring-purple-500 focus:placeholder:text-white focus:placeholder:scale-110 focus:placeholder:transition-transform focus:placeholder:duration-300"
-                        autoComplete="of"
+                        autoComplete="off"
                         maxLength={10}
                       />
                     </div>
                   </div>
+
                   <div>
                     <Input
                       name="email"
@@ -181,6 +193,7 @@ export default function SignupPage() {
                       maxLength={30}
                     />
                   </div>
+
                   <div>
                     <Input
                       name="password"
@@ -194,6 +207,7 @@ export default function SignupPage() {
                       maxLength={20}
                     />
                   </div>
+
                   <div>
                     <Input
                       name="dateOfBirth"
@@ -206,6 +220,7 @@ export default function SignupPage() {
                       className="bg-white/20 text-white justify-center border-white/30 placeholder:text-center focus:ring-purple-500"
                     />
                   </div>
+
                   <GradientButton
                     type="submit"
                     className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 text-white"
@@ -220,6 +235,7 @@ export default function SignupPage() {
                   >
                     Next
                   </GradientButton>
+
                   <p className="mt-5 text-center text-sm text-white/80">
                     <ShinyLink
                       text="have an account?"
@@ -238,36 +254,44 @@ export default function SignupPage() {
                     handleSubmit();
                   }}
                 >
-                  <div>
-                    <Input
-                      name="nickname"
-                      placeholder="Nickname"
-                      value={form.nickname}
-                      onChange={handleChange}
-                      className="bg-white/20 text-white border-white/30 placeholder:text-[#e6e6e6df] placeholder:text-center focus:ring-purple-500 focus:placeholder:text-white focus:placeholder:scale-110 focus:placeholder:transition-transform focus:placeholder:duration-300"
-                      autoComplete="off"
-                      maxLength={10}
-                    />
+                  {/* ✅ Scrollable content on mobile so buttons stay visible */}
+                  <div className="space-y-4 max-h-[62vh] sm:max-h-none overflow-y-auto pr-1">
+                    <div>
+                      <Input
+                        name="nickname"
+                        placeholder="Nickname"
+                        value={form.nickname}
+                        onChange={handleChange}
+                        className="bg-white/20 text-white border-white/30 placeholder:text-[#e6e6e6df] placeholder:text-center focus:ring-purple-500 focus:placeholder:text-white focus:placeholder:scale-110 focus:placeholder:transition-transform focus:placeholder:duration-300"
+                        autoComplete="off"
+                        maxLength={10}
+                      />
+                    </div>
+
+                    <div>
+                      <Textarea
+                        placeholder="Tell us about yourself"
+                        name="aboutMe"
+                        value={form.aboutMe}
+                        onChange={handleChange}
+                        className="bg-white/20 text-white border-white/30 placeholder:text-[#e6e6e6df] placeholder:text-center focus:ring-purple-500 focus:placeholder:text-white focus:placeholder:scale-110 focus:placeholder:transition-transform focus:placeholder:duration-300 resize-none"
+                        autoComplete="off"
+                        maxLength={100}
+                      />
+                    </div>
+
+                    <div>
+                      <Label>Select Your Avatar</Label>
+                      <div className="mt-2">
+                        <AvatarSelector
+                          onSelect={(filename) => {
+                            setForm((prev) => ({ ...prev, avatar: filename }));
+                          }}
+                        />
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <Textarea
-                      placeholder="Tell us about yourself"
-                      name="aboutMe"
-                      value={form.aboutMe}
-                      onChange={handleChange}
-                      className="bg-white/20 text-white border-white/30 placeholder:text-[#e6e6e6df] placeholder:text-center focus:ring-purple-500 focus:placeholder:text-white focus:placeholder:scale-110 focus:placeholder:transition-transform focus:placeholder:duration-300 resize-none"
-                      autoComplete="off"
-                      maxLength={100}
-                    />
-                  </div>
-                  <div>
-                    <Label>Select Your Avatar</Label>
-                    <AvatarSelector
-                      onSelect={(filename) => {
-                        setForm((prev) => ({ ...prev, avatar: filename }));
-                      }}
-                    />
-                  </div>
+
                   <GradientButton
                     type="submit"
                     className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 text-white"
@@ -282,30 +306,23 @@ export default function SignupPage() {
                   >
                     Sign Up
                   </GradientButton>
-                  <div className="flex justify-between gap-4">
+
+                  {/* ✅ Buttons full width on mobile, original widths on desktop */}
+                  <div className="flex flex-col sm:flex-row justify-between gap-3 sm:gap-4">
                     <Button
                       type="button"
                       onClick={() => setStep(1)}
-                      className="w-1/4 bg-gray-500 hover:bg-gray-600"
+                      className="w-full sm:w-1/4 bg-gray-500 hover:bg-gray-600"
                     >
-                      <ShinyText
-                        text="Back"
-                        disabled={false}
-                        speed={3}
-                        className=""
-                      />
+                      <ShinyText text="Back" disabled={false} speed={3} />
                     </Button>
+
                     <Button
                       type="button"
                       onClick={handleSubmit}
-                      className="w-1/4 bg-indigo-500 hover:bg-indigo-600 text-white"
+                      className="w-full sm:w-1/4 bg-indigo-500 hover:bg-indigo-600 text-white"
                     >
-                      <ShinyText
-                        text="Skip"
-                        disabled={false}
-                        speed={3}
-                        className=""
-                      />
+                      <ShinyText text="Skip" disabled={false} speed={3} />
                     </Button>
                   </div>
                 </form>
