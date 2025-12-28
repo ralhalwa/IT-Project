@@ -2,21 +2,37 @@ services:
   backend:
     build:
       context: ./backend
+    container_name: bombernet-backend
     ports:
       - "8080:8080"
     volumes:
       - sqlite_data:/app/database
     restart: unless-stopped
 
+  game:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.game
+    container_name: bombernet-game
+    ports:
+      - "8081:8081"
+    restart: unless-stopped
+
   frontend:
     build:
       context: ./frontend
+      dockerfile: Dockerfile
+    container_name: bombernet-frontend
     ports:
       - "3000:3000"
     environment:
+      # If your Next app reads this, keep it.
       - NEXT_PUBLIC_API_URL=http://backend:8080
+      # Optional: only if your game client needs a WS URL from env
+      - NEXT_PUBLIC_GAME_WS_URL=ws://game:8081
     depends_on:
       - backend
+      - game
     restart: unless-stopped
 
 volumes:

@@ -1,0 +1,12 @@
+FROM node:20-alpine3.20
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm ci || npm install
+
+COPY . .
+
+# change if your server uses a different port
+EXPOSE 8081
+
+CMD ["node", "server.js"]
