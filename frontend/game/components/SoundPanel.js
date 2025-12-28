@@ -405,29 +405,29 @@ export default function SoundPanel({ open, onClose, onVolumeChange }) {
         ),
         
         // Test sound button
-        h(
-          "button",
-          {
-            onclick: playTestSound,
-            disabled: isMuted || soundEffectsVol === 0,
-            class: `
-              w-full mt-4 py-3 px-4 rounded-xl
-              bg-gradient-to-r from-blue-600/70 to-purple-600/70
-              border border-blue-500/50
-              hover:from-blue-500/70 hover:to-purple-500/70
-              hover:border-blue-400/50
-              active:scale-95 transition-all duration-200
-              flex items-center justify-center gap-3
-              ${(isMuted || soundEffectsVol === 0) ? "opacity-50 cursor-not-allowed" : ""}
-            `
-          },
-          h("span", { 
-            class: "text-white text-lg" 
-          }, "▶️"),
-          h("span", { 
-            class: "text-white font-bold text-sm" 
-          }, (isMuted || soundEffectsVol === 0) ? "SOUND MUTED" : "Test Sound")
-        )
+        // h(
+        //   "button",
+        //   {
+        //     onclick: playTestSound,
+        //     disabled: isMuted || soundEffectsVol === 0,
+        //     class: `
+        //       w-full mt-4 py-3 px-4 rounded-xl
+        //       bg-gradient-to-r from-blue-600/70 to-purple-600/70
+        //       border border-blue-500/50
+        //       hover:from-blue-500/70 hover:to-purple-500/70
+        //       hover:border-blue-400/50
+        //       active:scale-95 transition-all duration-200
+        //       flex items-center justify-center gap-3
+        //       ${(isMuted || soundEffectsVol === 0) ? "opacity-50 cursor-not-allowed" : ""}
+        //     `
+        //   },
+        //   h("span", { 
+        //     class: "text-white text-lg" 
+        //   }, "▶️"),
+        //   h("span", { 
+        //     class: "text-white font-bold text-sm" 
+        //   }, (isMuted || soundEffectsVol === 0) ? "SOUND MUTED" : "Test Sound")
+        // )
       ),
       
       // Bottom decorative border
