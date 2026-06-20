@@ -10,6 +10,8 @@ export default function LeftHud({ players, chatMessages, livesMap = {} }) {
   const BUBBLE_LEFT = 10;
   const BUBBLE_MAX_W = 240;
   const BUBBLE_BASE_GAP = 8;
+  const PIPE_WIDTH = 128; // width of the pipe avatar container
+  const BUBBLE_GAP = 8;
 
   // Normalize players to an array so HUD never crashes if an object slips through
   const list = Array.isArray(players)
@@ -197,18 +199,26 @@ export default function LeftHud({ players, chatMessages, livesMap = {} }) {
                   backdrop-blur-[2px] overflow-hidden
                 `,
                 style: `
-                  left:${BUBBLE_LEFT}px;
-                  bottom:calc(25% + ${verticalOffsetPx}px);
+                  left: calc(${PIPE_WIDTH}px + ${BUBBLE_GAP}px);
+                  top: 50%;
+                  transform: translateY(-50%);
                   min-width: 140px;
                   max-width:${BUBBLE_MAX_W}px;
                 `,
               },
               h("div", { class: "whitespace-normal break-words text-[14px] leading-5" }, text),
               h("span", {
-                class: `
-                  absolute left-3 -bottom-5 w-2.5 h-2.5 rotate-45
-                  bg-white/95 border-l border-b border-black/10
-                  shadow-[2px_2px_6px_rgba(0,0,0,.12)]
+                style: `
+                  position: absolute;
+                  left: -9px;
+                  top: 50%;
+                  transform: translateY(-50%) rotate(45deg);
+                  width: 10px;
+                  height: 10px;
+                  background: rgba(255,255,255,0.95);
+                  border-left: 1px solid rgba(0,0,0,0.1);
+                  border-bottom: 1px solid rgba(0,0,0,0.1);
+                  box-shadow: 2px 2px 6px rgba(0,0,0,0.12);
                 `,
               })
             );

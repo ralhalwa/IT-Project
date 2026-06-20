@@ -23,8 +23,18 @@ export default function QuickChatPopover({ quickText, setQuickText, onSend, onCl
         value: quickText,
         onInput: (e) => setQuickText(e.target.value),
         onKeydown: (e) => {
-          if (e.key === "Enter" && e.target.value.trim()) onSend();
-          if (e.key === "Escape") onClose();
+          if (e.key === "Enter") {
+            if (e.target.value.trim()) {
+              e.preventDefault();
+              e.stopPropagation();
+              onSend();
+            }
+          }
+          if (e.key === "Escape") {
+            e.preventDefault();
+            e.stopPropagation();
+            onClose();
+          }
         },
         autofocus: true,
       }),
